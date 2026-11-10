@@ -71,6 +71,141 @@ static int32_t fmt_num(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
+/* ---- the loop page's waveform: the sample, STRT/END ticks and the loop's two markers ----------------- *
+ * Painted over the page's empty lower half. LLEN's knob exists only on this page, so its graphic's callback
+ * says the page is being drawn and takes the values the page shows (a held step's locks included); ev_draw,
+ * which comes after the frame is composed, then paints. Returning 0 leaves the knob its stock graphic. */
+#ifdef OS154
+#define SMP_TAB  0x4031a3a0u
+#else
+#define SMP_TAB  0x403193a0u
+#endif
+#define FULL     0x7800                         /* 120.0: STRT, LEN and LOOP's scale */
+#define WX0      24                             /* the strip: x to the right of the LEV fader */
+#define WCOLS    102
+#define WY0      2                              /* y = 0 is the screen's bottom row; 0-1 the STRT/END ticks */
+#define WMID     12
+#define WHALF    10
+#define WTOP     (WMID + WHALF + 2)             /* the loop markers' flags: the two rows above the wave */
+#define WPROBES  64                             /* samples read a column: a long sample stays cheap */
+
+static struct { int on, slot, play, strt, endv, loopv, llen; } shown;
+static signed char lo[WCOLS], hi[WCOLS];
+static const short *peaks_pcm;
+static uint32_t peaks_len;
+
+static int clampi(int x, int a, int b)
+{
+    return x < a ? a : x > b ? b : x;
+}
+
+static int32_t llen_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t flag)
+{
+    int play = cm_src_shown(1), strt = cm_src_shown(4), len = cm_src_shown(5), g = cm_src_shown(6);
+    int samp = cm_src_shown(3), lfin = cm_src_shown(EX_LFIN);
+    (void)bmp; (void)x; (void)y; (void)flag;
+    if (play == CM_NO_VALUE || strt == CM_NO_VALUE || len == CM_NO_VALUE || g == CM_NO_VALUE ||
+        samp == CM_NO_VALUE || lfin == CM_NO_VALUE)
+        return 0;
+    shown.play = (play >> 8) & 255;
+    shown.slot = (samp >> 8) & 255;
+    shown.strt = clampi(strt, 0, FULL);
+    shown.endv = clampi(strt + len, 0, FULL);
+    shown.loopv = clampi((g ? clampi(g - 1, 0, FULL) : shown.strt) + 2 * ((lfin >> 8) & 127), 0, shown.endv);
+    shown.llen = (value >> 8) & 127;
+    shown.on = 1;
+    return 0;
+}
+
+static void make_peaks(const short *pcm, uint32_t len)
+{
+    int c, p, top = 1;
+    for (c = 0; c < WCOLS; c++) {
+        uint32_t a = (len / WCOLS) * (uint32_t)c, n = len / WCOLS;
+        uint32_t step = n / WPROBES ? n / WPROBES : 1;
+        int mn = 0, mx = 0;
+        for (p = 0; p < WPROBES && (uint32_t)p * step < n; p++) {
+            int v = pcm[a + (uint32_t)p * step];
+            if (v < mn)
+                mn = v;
+            if (v > mx)
+                mx = v;
+        }
+        lo[c] = (signed char)(mn >> 8);
+        hi[c] = (signed char)(mx >> 8);
+        if (-lo[c] > top)
+            top = -lo[c];
+        if (hi[c] > top)
+            top = hi[c];
+    }
+    for (c = 0; c < WCOLS; c++) {                /* quiet samples still fill the strip */
+        lo[c] = (signed char)(lo[c] * WHALF / top);
+        hi[c] = (signed char)(hi[c] * WHALF / top);
+    }
+}
+
+static int col_of(int val)
+{
+    return val * (WCOLS - 1) / FULL;
+}
+
+/* A loop marker: on where the wave isn't and off where it is, so it shows over a loud sample too. */
+static void marker(void *bmp, int c)
+{
+    int x = WX0 + c, y0 = WMID + lo[c], y1 = WMID + hi[c];
+    if (y0 > WY0)
+        fw_fillrect(bmp, x, WY0, x, y0 - 1, 1);
+    fw_fillrect(bmp, x, y0, x, y1, 0);
+    if (y1 < WTOP)
+        fw_fillrect(bmp, x, y1 + 1, x, WTOP, 1);
+}
+
+void digicmi_wave_draw(void *bmp, void *ctrl)
+{
+    const volatile uint32_t *e;
+    const short *pcm;
+    uint32_t len;
+    int c, a, b, looped, le;
+    (void)ctrl;
+    if (!shown.on)
+        return;
+    shown.on = 0;
+    fw_fillrect(bmp, WX0, 0, WX0 + WCOLS - 1, WTOP, 0);   /* the blank knobs' boxes go */
+    e = (const volatile uint32_t *)(SMP_TAB + 16 * (uint32_t)shown.slot);
+    pcm = (const short *)e[0];
+    len = e[2];
+    if ((uint32_t)pcm < 0x40000000u || len <= 248u) {    /* no sample: the slots' silent dummy */
+        fw_fillrect(bmp, WX0, WMID, WX0 + WCOLS - 1, WMID, 1);
+        return;
+    }
+    if (pcm != peaks_pcm || len != peaks_len) {
+        make_peaks(pcm, len);
+        peaks_pcm = pcm;
+        peaks_len = len;
+    }
+    looped = shown.play == 2;                    /* FWD.L: the only PLAY the loop controls act on */
+    le = shown.llen ? shown.loopv + shown.llen * (FULL / 128) : shown.endv;
+    if (le > shown.endv)
+        le = shown.endv;
+    a = col_of(shown.loopv);
+    b = col_of(le);
+    for (c = 0; c < WCOLS; c++)                  /* solid inside the loop, dotted outside it */
+        if (!looped || (c >= a && c <= b) || !(c & 1))
+            fw_fillrect(bmp, WX0 + c, WMID + lo[c], WX0 + c, WMID + hi[c], 1);
+
+    c = col_of(shown.strt);                      /* STRT and END: ticks along the bottom */
+    fw_fillrect(bmp, WX0 + c, 0, WX0 + c, 1, 1);
+    c = col_of(shown.endv);
+    fw_fillrect(bmp, WX0 + c, 0, WX0 + c, 1, 1);
+
+    if (looped) {                                /* a line and an inward flag at each end of the loop */
+        marker(bmp, a);
+        marker(bmp, b);
+        fw_fillrect(bmp, WX0 + a, WTOP - 1, clampi(WX0 + a + 3, 0, WX0 + WCOLS - 1), WTOP, 1);
+        fw_fillrect(bmp, clampi(WX0 + b - 3, WX0, WX0 + WCOLS - 1), WTOP - 1, WX0 + b, WTOP, 1);
+    }
+}
+
 #define EXTRA(sn, ln, d, f, c) { .name = sn, .lname = ln, .look = P_BR, .flags = CM_RANGE | CM_DEFAULT, \
     .cc = c, .min = 0, .max = 127 << 8, .def = (d) << 8, .fmt = f }
 
@@ -95,7 +230,8 @@ const struct cm_ui32 digicmi_page = {
                     .min = 0, .max = 0x7802, .def = 0 },
         } },
     .extra = {
-        EXTRA("LLEN", "Loop Length", 0, fmt_llen, 24),
+        { .name = "LLEN", .lname = "Loop Length", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
+          .cc = 24, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_llen, .draw = llen_draw },
         EXTRA("LMOD", "Loop Mode", 0, fmt_lmod, 25),
         EXTRA("DIR", "Loop Direction", 0, fmt_dir, 26),
         EXTRA("LFIN", "Loop Start Fine", 0, fmt_num, 27),

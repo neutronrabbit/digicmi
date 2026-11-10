@@ -1,12 +1,12 @@
 {
  "id": "digicmi",
- "version": "0.3",
+ "version": "0.4",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "digicmi (from gdeo607 Digi Poly 2.1, MIT)",
  "device": "digitakt-mk1",
  "os": "1.53",
- "description": "Adds a CMI machine (FUNC+SRC list), machine 40: Digi Poly 2.1's polyphony on ONESHOT, with CMI-style loop controls. The track plays one one-shot sample polyphonically, pitched from MIDI note 60, borrowing other tracks' voices (SETTINGS > POLY picks which). Velocity sets each voice's volume. Page 2 (SRC again), with PLAY = FWD.L: LLEN loop length (0 = to the end), LMOD HOLD/SUS (SUS: loop while held, then play on to the end), DIR FWD/ALT (ping-pong), LFIN fine loop start; CCs 24-27. Loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Voice stealing takes the quietest voice. Conflicts with Digi Poly and DIGISLICER (same sites).",
+ "description": "Adds a CMI machine (FUNC+SRC list), machine 40: Digi Poly 2.1's polyphony on ONESHOT, with CMI-style loop controls. The track plays one one-shot sample polyphonically, pitched from MIDI note 60, borrowing other tracks' voices (SETTINGS > POLY picks which). Velocity sets each voice's volume. Page 2 (SRC again), with PLAY = FWD.L: LLEN loop length (0 = to the end), LMOD HOLD/SUS (SUS: loop while held, then play on to the end), DIR FWD/ALT (ping-pong), LFIN fine loop start; CCs 24-27. Loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Voice stealing takes the quietest voice. Conflicts with Digi Poly and DIGISLICER (same sites). The loop page's lower half shows the sample's waveform with STRT, END and loop markers.",
  "sources": [
   "poly_ui.s",
   "poly_glue.s",
@@ -129,6 +129,11 @@
    "event": "ev_tick",
    "fn": "digipoly_rectick",
    "order": 30
+  },
+  {
+   "event": "ev_draw",
+   "fn": "digicmi_wave_draw",
+   "order": 60
   }
  ],
  "resources": {
