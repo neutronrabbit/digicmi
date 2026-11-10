@@ -167,7 +167,7 @@ row_label:
 row_poly:
         .long   row_label, digipoly_select, digipoly_draw, digipoly_change
 str_row:
-        .asciz  "POLY"
+        .asciz  "8 TRACK POLY"
         .balign 2
 
 | ---------------- recording a live note: the tail of the record path (0x400d55c6) -----------------

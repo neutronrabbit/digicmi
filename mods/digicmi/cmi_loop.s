@@ -54,3 +54,14 @@ digicmi_stage_s:
         movea.l (%sp)+, %a1
         movea.l (%sp)+, %a0
         rts
+
+| 0x40008476: the LED frame's last step, the rest of the LEDs and the send (was: lea -12(sp),sp ;
+| movem.l d2/a2-a3,(sp); 8 bytes, by jmp). digicmi_leds(mgr) goes first: 8 TRACK POLY's blue keys.
+        .globl  digicmi_leds_s
+digicmi_leds_s:
+        move.l  4(%sp), -(%sp)
+        jsr     digicmi_leds
+        addq.l  #4, %sp
+        lea     -12(%sp), %sp
+        movem.l %d2/%a2-%a3, (%sp)
+        jmp     0x4000847e

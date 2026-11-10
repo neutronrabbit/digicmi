@@ -89,6 +89,7 @@ typedef unsigned int u32;
 
 #define POLY     40                       /* digicmi's CMI machine number (poly_ui.s; Digi Poly's is 6) */
 #define TAG      0xc4
+#define TAG_COPY 0xc5                     /* digicmi: M_CHORD's mark on a chord's extra notes */
 #define NOTE_OFF 0x40                     /* NOT2..4: 0x40 = no note, else offset + 0x40 */
 
 /* message fields */
@@ -102,12 +103,22 @@ typedef unsigned int u32;
 #define M_VEL    20                       /* digicmi: the velocity, s16 8.8 (100 = 0x6400; render 0x40077a2c) */
 #define M_SOUND  40
 #define M_SLOCK  44
+#define M_LOCKS  68                       /* digicmi: the note's p-lock list; +8 its count */
 #define M_NEXT   72
 
 #include "kitstore.h"
 #define POOLOUT(kit, t) XB(kit, 6 * (t) + 3)   /* bit 7: track t is kept out of the POLY pool */
 static struct kstore store;
-static unsigned char poolmask(int n) { return n % 6 == 3 ? 0x80 : 0; }
+/* digicmi: 8 TRACK POLY, all or nothing: bit 0 of track 8's byte 6t + 3 in every pattern's kit, read from kit 0
+ * (the kits are all in RAM and saved with the project; bit 7 was Digi Poly's per-track pool). */
+#define POLY8_N 45
+static unsigned char poolmask(int n) { return n == POLY8_N ? 0x01 : 0; }
+unsigned char digicmi_poly8;                /* the mode, as of the last UI tick */
+#ifdef OS154
+#define FUNC_HELD (*(volatile int *)0x4217bbb4)   /* the panel's FUNC key, kept by its key scan (0x400d3cce) */
+#else
+#define FUNC_HELD (*(volatile int *)0x4217abb4)   /* by the usual 0x1000 shift: unverified */
+#endif
 unsigned char dt8poly_vstate[8] = {       /* voice -> live POLY note it holds, 0xff = none (Digi utilities */
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff  /* reads it for the activity dots) */
 };
@@ -116,12 +127,7 @@ static u32 started[8], clock;             /* voice -> clock at its last note sta
 
 static int is_poly(const unsigned char *kit, int t)
 {
-    return kit && (unsigned)t < 8 && kit[0x9e + t * 0xa2] == POLY;
-}
-
-static int locked(const unsigned char *kit, int t)
-{
-    return kit && (unsigned)t < 8 && (POOLOUT(kit, t) & 0x80);
+    return digicmi_poly8 && kit && t == 0;   /* digicmi: track 1 is the instrument; its machine is forced */
 }
 
 static int muted(int v, const char *fp)
@@ -135,14 +141,6 @@ static int trig_on(const char *m)          /* a note message that starts a voice
     return (ty < 2 || ty > 5) && M(m, M_ON) == 1 && (f & 0x81) == 0x81 && !(f & 0x40000);
 }
 
-static int own_trig_pending(const char *m, int v)   /* the voice's own track trigs later in this block */
-{
-    for (; m; m = (const char *)M(m, M_NEXT))
-        if (M(m, M_VOICE) == v && M(m, M_ID) == 1 && trig_on(m))
-            return 1;
-    return 0;
-}
-
 /* digicmi: of the voices that may be stolen, the quietest (its AMP envelope's level, core 3.0's
  * fw_amp_env), so long release and reverse tails survive; among equally quiet ones (all finished, at 0)
  * the one whose last note started longest ago, as Digi Poly does. */
@@ -154,14 +152,12 @@ int digicmi_steal(u32 used, const char *fp, const char *rest) __attribute__((noi
 #define steal digicmi_steal                 /* a symbol of its own, so tests/digiemu_poly.py can watch it */
 int digicmi_steal(u32 used, const char *fp, const char *rest)
 {
-    const unsigned char *kit = ENGINE_KIT;
     int v, best = -1;
     u32 age, oldest = 0, lvl, quietest = 0;
+    (void)fp; (void)rest;
     for (v = 0; v < 8; v++) {
-        if ((used >> v) & 1 || locked(kit, v))
-            continue;
-        if (muted(v, fp) || OWNER[v] >= 2 || own_trig_pending(rest, v))
-            continue;
+        if ((used >> v) & 1 || OWNER[v] >= 2)
+            continue;                           /* digicmi: pool, mutes and other tracks' trigs don't count */
         lvl = (u32)fw_amp_env[3 * v + 1];
         if (lvl & 0x80000000u)
             lvl = 0u - lvl;                     /* magnitude; 0x80000000 stays the loudest */
@@ -186,7 +182,7 @@ static int holder(int p, int note)          /* the voice holding POLY track p's 
 
 void digipoly_route_c(char *m, u32 busy, const char *fp)
 {
-    int v = M(m, M_VOICE), id = M(m, M_ID), i, w, n;
+    int v = M(m, M_VOICE), id = M(m, M_ID), i, w, n, remapped = 0;
     const unsigned char *kit = ENGINE_KIT;
 
     for (w = 0; w < 8; w++)                 /* forget live notes the engine has let go */
@@ -194,6 +190,20 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
             dt8poly_vstate[w] = 0xff;
     if ((unsigned)v > 7)
         return;
+
+    if (digicmi_poly8 && v != 0) {          /* digicmi: one instrument, on track 1 */
+        if (id == 1 && ((u32)M(m, M_CHORD) >> 24) != TAG_COPY) {
+            char *l = (char *)M(m, M_LOCKS);
+            M(m, M_ID) = -1;                /* tracks 2-8's own trigs are silent, */
+            if (l)
+                M(l, 8) = 0;                /* and their p-locks don't reach the voice; the list is this note's */
+            return;
+        }
+        if (id == 2) {                      /* a note on any track's channel plays track 1 */
+            M(m, M_VOICE) = v = 0;
+            remapped = 1;
+        }
+    }
 
     if (id == 1) {                          /* sequencer */
         u32 tag = M(m, M_CHORD), used;
@@ -225,7 +235,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
             MSG_COPY(c, m);
             M(c, M_VOICE) = w;
             M(c, M_NOTE) = n;
-            M(c, M_CHORD) = 0;
+            M(c, M_CHORD) = (int)((u32)TAG_COPY << 24);   /* digicmi: a chord note, not that voice's own trig */
             M(c, M_FLAGS) |= 0x10000;       /* the pitch is the message's note */
             M(c, M_NEXT) = M(m, M_NEXT);
             M(m, M_NEXT) = (int)c;
@@ -251,7 +261,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
             return;
         }
         M(m, M_VOICE) = w;
-        if (w != v && !M(m, M_SLOCK))
+        if ((w != v || remapped) && !M(m, M_SLOCK))
             M(m, M_SOUND) = (int)(kit + 0x20 + v * 0xa2);   /* the POLY track's sound */
         held_by[w] = v;
         dt8poly_vstate[w] = n;
@@ -349,39 +359,44 @@ void digipoly_trigkind(char *view)
 /* ---- SETTINGS > POLY: the tracks 1..8 that lend their voice ----
  * LEFT/RIGHT choose a track, YES takes it out of the pool or puts it back. The checkbox shows the chosen
  * track's state: ticked = its voice is in the POLY pool. A track in the pool is shown inverted. */
-static int cursor;
-
 void digipoly_select(void **payload)
 {
-    unsigned char *kit = UI_KIT;
-    if (kit)
-        POOLOUT(kit, cursor) = (unsigned char)(POOLOUT(kit, cursor) ^ 0x80);
+    unsigned on = !digicmi_poly8, p;
+    for (p = 0; p < KS_PATTERNS; p++) {     /* every pattern's kit, into the unit's non-volatile mirror */
+        unsigned char *kit = (unsigned char *)(KS_KIT0 + p * KS_KIT_STEP);
+        XB(kit, POLY8_N) = (unsigned char)((XB(kit, POLY8_N) & ~1) | on);
+        ks_persist(kit, 7);
+    }
+    digicmi_poly8 = (unsigned char)on;
     INVALIDATE((char *)*payload + 0x38);
 }
 
 void digipoly_change(void **payload, int unused, int delta)
 {
-    if (delta > 0 && cursor < 7)
-        cursor++;
-    else if (delta < 0 && cursor > 0)
-        cursor--;
-    else
-        return;
-    INVALIDATE((char *)*payload + 0x38);
+    (void)payload; (void)unused; (void)delta;
 }
 
 void digipoly_draw(void *a, void *b, void *bmp, int x, int y)
 {
-    const unsigned char *kit = UI_KIT;
-    int t, cx;
-    BLIT(bmp, CHECKBOXES + (locked(kit, cursor) ? 0 : 0x1c), x, y, 0);   /* the chosen track: in the pool? */
-    for (t = 0; t < 8; t++) {               /* after the label: 1..8, the pool's tracks inverted */
-        cx = x + 34 + t * 5;
-        TEXT(bmp, FONT5, cx, y, -1, "%d", t + 1);
-        if (!locked(kit, t))
-            FILLRECT(bmp, cx - 1, y - 1, cx + 3, y + 5, -1);
-        if (t == cursor)
-            FILLRECT(bmp, cx - 1, y + 7, cx + 3, y + 7, -1);   /* a bar over it (y grows upwards) */
+    (void)a; (void)b;
+    BLIT(bmp, CHECKBOXES + (digicmi_poly8 ? 0x1c : 0), x, y, 0);
+}
+
+/* ---- digicmi: while FUNC is held in 8 TRACK POLY, the eight track keys are blue ----
+ * The UI's LED frame clears the LedManager, the views set theirs (the first setter of an LED wins, by
+ * mgr + 44 + 4 led), then 0x40008476 fills the rest and sends them; cmi_loop.s comes here first, so these
+ * clear that mark and take the LED. Colour 0x13 in mode 2 is the keyboard's blue (0x40029848). */
+#define LED_SET  ((void (*)(void *, int, int, int))0x400083a0)
+#define KEY_LED  ((int (*)(int))0x400084b6)         /* a trig key's LED */
+void digicmi_leds(char *mgr)
+{
+    int k;
+    if (!digicmi_poly8 || !FUNC_HELD)
+        return;
+    for (k = 0; k < 8; k++) {
+        int led = KEY_LED(k);
+        *(volatile int *)(mgr + 44 + 4 * led) = 0;
+        LED_SET(mgr, led, 2, 0x13);
     }
 }
 
@@ -529,7 +544,12 @@ void digipoly_rectick(void *ctrl)
 {
     int t;
     (void)ctrl;
-    kstore_tick(&store, UI_KIT, KS_SLOT_POLY, poolmask);   /* a sound loaded onto a track keeps its pool flag */
+    kstore_tick(&store, UI_KIT, KS_SLOT_POLY, poolmask);   /* a sound loaded onto a track keeps the mode's bit */
+    digicmi_poly8 = XB((unsigned char *)KS_KIT0, POLY8_N) & 1;
+    if (digicmi_poly8 && UI_KIT && UI_KIT[0x9e] != POLY) {     /* overriding the machine menu on track 1 */
+        UI_KIT[0x9e] = POLY;
+        ks_persist(UI_KIT, 0);
+    }
     for (t = 0; t < 8; t++)
         if (rec_age[t] > 0 && --rec_age[t] == 0)
             rec_n[t] = 0;
