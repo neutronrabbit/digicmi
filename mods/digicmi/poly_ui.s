@@ -22,8 +22,8 @@
         .balign 4
         .globl  digipoly_machine
 digipoly_machine:                       | id, name, short name, icon, params, render
-        .long   POLY_ID, poly_str, poly_str, poly_icon, 0, 0   | ONESHOT's parameters and renderer
-        .long   0x55493330, poly_page       | core 3.0's tail: its page (machine-pages)
+        .long   POLY_ID, poly_str, poly_str, poly_icon, 3, 0   | SLICE's bank (for page 2), ONESHOT's renderer
+        .long   0x55493330, digicmi_page    | core 3.0's tail: its pages (machine-pages, cmi_page.c)
 poly_str:
         .asciz  "CMI"
         .balign 4
@@ -37,16 +37,4 @@ poly_px:
 poly_mask:
         .rept   11
         .long   0xfe000000
-        .endr
-
-| POLY's SRC and LFO pages, drawn by machine-pages (core 3.0; elekloader's digitakt-mk1/core3.h struct cm_ui):
-| ONESHOT's page as it is (page_from 0, every knob the stock one).
-        .balign 4
-poly_page:
-        .long   cm_ui_v3                    | +0 abi
-        .byte   0, 0                        | +4 page_from: ONESHOT; flags
-        .short  0
-        .long   0, 0                        | +8 group, +12 on_switch: the stock ones, none
-        .rept   8                           | +16 knobs A..H: the stock ones (40 bytes each)
-        .long   0, 0, 0, 0, 0, 0, 0, 0, 0, 0
         .endr
