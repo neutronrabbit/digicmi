@@ -1,12 +1,12 @@
 {
  "id": "digicmi",
- "version": "0.1",
+ "version": "0.2",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "digicmi (from gdeo607 Digi Poly 2.1, MIT)",
  "device": "digitakt-mk1",
  "os": "1.53",
- "description": "Adds a CMI machine (FUNC+SRC list), machine 40: Digi Poly 2.1's polyphony (other tracks lend their voices; SETTINGS > POLY picks which) on SLICE's parameters, page and renderer, with velocity layers. The track's sample is a chain of equal slices, softest first; GRID sets how many (4 << GRID), and each note's velocity picks its slice through a SLICE p-lock in the note's message. Voice stealing takes the quietest voice. Conflicts with Digi Poly (same sites).",
+ "description": "Adds a CMI machine (FUNC+SRC list), machine 40: Digi Poly 2.1's polyphony on ONESHOT. The track plays one one-shot sample polyphonically, pitched from MIDI note 60, borrowing other tracks' voices (SETTINGS > POLY picks which); notes on the track's MIDI channel play one voice each. Velocity sets each voice's volume (the stock gain, (vel/127)^2). Voice stealing takes the quietest voice. Conflicts with Digi Poly (same sites).",
  "sources": [
   "poly_ui.s",
   "poly_glue.s",

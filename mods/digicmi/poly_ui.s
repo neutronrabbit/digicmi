@@ -22,7 +22,7 @@
         .balign 4
         .globl  digipoly_machine
 digipoly_machine:                       | id, name, short name, icon, params, render
-        .long   POLY_ID, poly_str, poly_str, poly_icon, 3, 3   | SLICE's parameters and renderer
+        .long   POLY_ID, poly_str, poly_str, poly_icon, 0, 0   | ONESHOT's parameters and renderer
         .long   0x55493330, poly_page       | core 3.0's tail: its page (machine-pages)
 poly_str:
         .asciz  "CMI"
@@ -40,11 +40,11 @@ poly_mask:
         .endr
 
 | POLY's SRC and LFO pages, drawn by machine-pages (core 3.0; elekloader's digitakt-mk1/core3.h struct cm_ui):
-| digicmi: SLICE's page as it is (page_from 3, every knob the stock one).
+| ONESHOT's page as it is (page_from 0, every knob the stock one).
         .balign 4
 poly_page:
         .long   cm_ui_v3                    | +0 abi
-        .byte   3, 0                        | +4 page_from: SLICE; flags
+        .byte   0, 0                        | +4 page_from: ONESHOT; flags
         .short  0
         .long   0, 0                        | +8 group, +12 on_switch: the stock ones, none
         .rept   8                           | +16 knobs A..H: the stock ones (40 bytes each)
