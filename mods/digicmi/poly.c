@@ -15,7 +15,8 @@
  *
  * Which voice is stolen: never the POLY track's own (it plays NOTE), a track kept out of the pool in
  * SETTINGS > POLY, a muted track's voice, a voice holding a live note, or one whose own track has a trig
- * in the same block; of the others, the one whose last note started longest ago. With no voice left the
+ * in the same block; of the others, the quietest (AMP envelope level; digicmi), then the one whose last
+ * note started longest ago. With no voice left the
  * extra note is dropped. A stolen voice plays the POLY track's whole sound and gets its own back at its
  * own track's next trig (the engine reloads a voice's sound when a message brings another one).
  *
@@ -39,6 +40,8 @@
 #define F_400d575e 0x400d5986
 #define F_400ee036 0x400ee25e
 #define F_400ee0a0 0x400ee2c8
+#define F_400edfe6 0x400ee20e   /* digicmi: a lock list, emptied (digislicer's OS_LOCKLIST) */
+#define F_400ee008 0x400ee230   /* digicmi: release a lock list (ref count) */
 #define F_40200b0c 0x40200ebc
 #define F_4020c29c 0x4020c64c
 #define F_409bac18 0x409bbc18
@@ -57,6 +60,8 @@
 #define F_400d575e 0x400d575e
 #define F_400ee036 0x400ee036
 #define F_400ee0a0 0x400ee0a0
+#define F_400edfe6 0x400edfe6
+#define F_400ee008 0x400ee008
 #define F_40200b0c 0x40200b0c
 #define F_4020c29c 0x4020c29c
 #define F_409bac18 0x409bac18
@@ -86,7 +91,7 @@ typedef unsigned int u32;
 #define BLIT         ((void (*)(void *, const void *, int, int, int))F_400c2960)
 #define CHECKBOXES   (*(const char **)F_421f7a3c)   /* two bitmaps, 0x1c bytes each: empty, ticked */
 
-#define POLY     6                        /* its machine number (core 2.1; poly_ui.s) */
+#define POLY     40                       /* digicmi's CMI machine number (poly_ui.s; Digi Poly's is 6) */
 #define TAG      0xc4
 #define NOTE_OFF 0x40                     /* NOT2..4: 0x40 = no note, else offset + 0x40 */
 
@@ -98,8 +103,10 @@ typedef unsigned int u32;
 #define M_NOTE   24
 #define M_CHORD  28                       /* ours: 0xC4, NOT2, NOT3, NOT4 */
 #define M_FLAGS  36                       /* bit 7 trig, bit 0 on, bit 18: the engine's own note-off copy */
+#define M_VEL    20                       /* digicmi: the velocity, a byte (measured in digiemu, 1.54) */
 #define M_SOUND  40
 #define M_SLOCK  44
+#define M_LOCKS  68                       /* digicmi: the p-lock list, ref counted (MSG_COPY, 0x400ee0a0) */
 #define M_NEXT   72
 
 #include "kitstore.h"
@@ -141,19 +148,32 @@ static int own_trig_pending(const char *m, int v)   /* the voice's own track tri
     return 0;
 }
 
-static int steal(u32 used, const char *fp, const char *rest)
+/* digicmi: of the voices that may be stolen, the quietest (its AMP envelope's level, core 3.0's
+ * fw_amp_env), so long release and reverse tails survive; among equally quiet ones (all finished, at 0)
+ * the one whose last note started longest ago, as Digi Poly does. */
+extern volatile int fw_amp_env[];          /* [3 * t + 1]: track t's AMP envelope level, Q31, stored
+                                              negated: about -0.8 sounding, near 0 at the end of a release,
+                                              0 silent (measured in digiemu, OS 1.54); so compare magnitudes */
+
+int digicmi_steal(u32 used, const char *fp, const char *rest) __attribute__((noinline));
+#define steal digicmi_steal                 /* a symbol of its own, so tests/digiemu_poly.py can watch it */
+int digicmi_steal(u32 used, const char *fp, const char *rest)
 {
     const unsigned char *kit = ENGINE_KIT;
     int v, best = -1;
-    u32 age, oldest = 0;
+    u32 age, oldest = 0, lvl, quietest = 0;
     for (v = 0; v < 8; v++) {
         if ((used >> v) & 1 || locked(kit, v))
             continue;
         if (muted(v, fp) || OWNER[v] >= 2 || own_trig_pending(rest, v))
             continue;
+        lvl = (u32)fw_amp_env[3 * v + 1];
+        if (lvl & 0x80000000u)
+            lvl = 0u - lvl;                     /* magnitude; 0x80000000 stays the loudest */
         age = clock - started[v];
-        if (best < 0 || age > oldest) {
+        if (best < 0 || lvl < quietest || (lvl == quietest && age > oldest)) {
             best = v;
+            quietest = lvl;
             oldest = age;
         }
     }
@@ -167,6 +187,60 @@ static int holder(int p, int note)          /* the voice holding POLY track p's 
         if (dt8poly_vstate[v] == note && held_by[v] == p && OWNER[v] == 2)
             return v;
     return -1;
+}
+
+/* ---- digicmi: velocity layers ----
+ * The CMI track's sample is a chain of equal slices, softest layer first; SLICE's GRID (knob G) says how many
+ * (4 << GRID). A note's velocity picks the layer, and the note plays it through a SLICE lock (slot 21, value
+ * (slice + 1) << 8, as digislicer's keyboard records them) in the message's p-lock list, which the render
+ * puts into the starting voice. Lists (0x400edfe6): +0 ref count, +8 count, from +0x14 {u16 slot, s16 value}
+ * 8 bytes apart, 106 at most (the pool's init, 0x400ee13c on 1.54, is called with 0x6a); 64 in the pool.
+ * A sequencer note's list is its own (the step fire makes it, 0x4006f70a), so it is edited in place; a live
+ * note has none, and gets one only as a type 0 message, whose free (0x400ee294) releases it. */
+#define CMI_SLICE_SLOT 21
+#define CMI_GRID_BYTE  0x42                      /* a sound's slot 23 (knob G, GRID), its integer byte */
+#define LOCK_MAX       106
+#define LOCK_ALLOC()   ((char *)((u32 (*)(void))F_400edfe6)())
+#ifdef OS154
+#define LOCK_FREE_HEAD (*(volatile u32 *)0x421f7ee4)
+#else
+#define LOCK_FREE_HEAD (*(volatile u32 *)0x421f6ee4)
+#endif
+
+int digicmi_layer(int vel, int grid) __attribute__((noinline));
+int digicmi_layer(int vel, int grid)        /* 0-based layer of 4 << grid for a velocity 1-127 */
+{
+    int n = 4 << (grid < 0 ? 0 : grid > 4 ? 4 : grid);
+    if (vel < 1)
+        vel = 1;
+    if (vel > 127)
+        vel = 127;
+    return (vel - 1) * n / 127;
+}
+
+static void cmi_slice(char *m, const unsigned char *sound)
+{
+    char *l = (char *)M(m, M_LOCKS);
+    int i, n, value = (digicmi_layer(((unsigned char *)m)[M_VEL], sound[CMI_GRID_BYTE]) + 1) << 8;
+    if (!l) {
+        if (M(m, M_TYPE) != 0 || !LOCK_FREE_HEAD)
+            return;                             /* nobody would free it, or the pool is empty */
+        l = LOCK_ALLOC();
+        if (!l)
+            return;
+        M(l, 8) = 0;
+        M(m, M_LOCKS) = (int)l;
+    }
+    n = M(l, 8);
+    for (i = 0; i < n && i < LOCK_MAX; i++)
+        if (*(unsigned short *)(l + 0x14 + 8 * i) == CMI_SLICE_SLOT)
+            break;
+    if (i >= LOCK_MAX)
+        return;
+    *(unsigned short *)(l + 0x14 + 8 * i) = CMI_SLICE_SLOT;
+    *(short *)(l + 0x16 + 8 * i) = value;
+    if (i == n)
+        M(l, 8) = n + 1;
 }
 
 void digipoly_route_c(char *m, u32 busy, const char *fp)
@@ -189,6 +263,8 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
         if (!trig_on(m))
             return;
         started[v] = ++clock;
+        if (is_poly(kit, v) && !muted(v, fp))   /* digicmi: before the chord's copies, which share it */
+            cmi_slice(m, kit + 0x20 + v * 0xa2);
         if ((tag >> 24) != TAG || !is_poly(kit, v) || muted(v, fp))
             return;
         used = (1u << v) | busy;
@@ -241,6 +317,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
         held_by[w] = v;
         dt8poly_vstate[w] = n;
         started[w] = ++clock;
+        cmi_slice(m, kit + 0x20 + v * 0xa2);    /* digicmi: the velocity's layer */
     } else {
         w = holder(v, n);
         if (w >= 0) {

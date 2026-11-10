@@ -36,7 +36,7 @@ digipoly_tag:
         mulu.w  #0xa2, %d0
         lea     0x9e(%a0), %a0
         move.b  (%a0,%d0.l), %d1
-        cmpi.b  #6, %d1                         | POLY (machine 6, poly_ui.s)
+        cmpi.b  #40, %d1                        | CMI (machine 40, poly_ui.s; Digi Poly's 6)
         bne.b   9f
         movea.l %a3, %a1
         suba.l  %d4, %a1                        | the track's data (defaults at +0x384..)

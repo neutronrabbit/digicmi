@@ -14,7 +14,7 @@
 | ---- end of the moved addresses ----
 
 
-        .equ    POLY_ID, 6              | kits store it: fixed for good (resource machine:6)
+        .equ    POLY_ID, 40             | digicmi's CMI: kits store it, fixed for good (resource machine:40)
         .equ    BMP_VT, .LF_401b73b4      | the firmware's Bitmap vtable
         .equ    LAY_ONESHOT, .LF_4197ced8 | the SRC page layout of machine 0 (0x400657cc: 0x4197ced8 + 44 x m)
 
@@ -22,10 +22,10 @@
         .balign 4
         .globl  digipoly_machine
 digipoly_machine:                       | id, name, short name, icon, params, render
-        .long   POLY_ID, poly_str, poly_str, poly_icon, 0, 0
+        .long   POLY_ID, poly_str, poly_str, poly_icon, 3, 3   | SLICE's parameters and renderer
         .long   0x55493330, poly_page       | core 3.0's tail: its page (machine-pages)
 poly_str:
-        .asciz  "POLY"
+        .asciz  "CMI"
         .balign 4
 
 | 11 x 7, one word a column, rows in bits 25 (top) .. 31: a chord on a piano roll, three notes stacked
@@ -40,11 +40,11 @@ poly_mask:
         .endr
 
 | POLY's SRC and LFO pages, drawn by machine-pages (core 3.0; elekloader's digitakt-mk1/core3.h struct cm_ui):
-| ONESHOT's page as it is (page_from 0, every knob the stock one).
+| digicmi: SLICE's page as it is (page_from 3, every knob the stock one).
         .balign 4
 poly_page:
         .long   cm_ui_v3                    | +0 abi
-        .byte   0, 0                        | +4 page_from: ONESHOT; flags
+        .byte   3, 0                        | +4 page_from: SLICE; flags
         .short  0
         .long   0, 0                        | +8 group, +12 on_switch: the stock ones, none
         .rept   8                           | +16 knobs A..H: the stock ones (40 bytes each)

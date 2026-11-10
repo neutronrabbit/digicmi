@@ -1,12 +1,12 @@
 {
- "id": "digipoly",
- "version": "2.1",
- "title": "Digi Poly",
+ "id": "digicmi",
+ "version": "0.1",
+ "title": "Digi CMI",
  "category": "Sound",
- "author": "gdeo607",
+ "author": "digicmi (from gdeo607 Digi Poly 2.1, MIT)",
  "device": "digitakt-mk1",
  "os": "1.53",
- "description": "Adds a POLY machine (FUNC+SRC list). A POLY track plays chords from its own trigs: its TRIG page becomes the MIDI tracks' one (NOT1-NOT4, VEL, LEN, PROB, LFO.T) with the track's level beside it, and each extra note takes the voice of another track (voice stealing: the voice that started longest ago, never a muted one, one holding a live note or one whose track trigs at the same time). Pressing the track's key plays the whole chord. Notes received on the POLY track's own MIDI channel play polyphonically, one voice per note, and recording them writes the chord into the step's NOT1-NOT4 (up to four notes) instead of a bare trig. On its TRIG page the LEVEL knob sets the track level and the LEV fader shows it, as on the audio pages. SETTINGS > POLY chooses which tracks lend their voice to the pool; that is kept in the kit, so each pattern has its own voice allocation and it is saved with the project. A stolen voice plays the POLY track's sound, follows its knobs and level while it does, and gets its own sound back at its next trig. Kits saved with POLY load as ONESHOT on the stock OS. POLY is machine 6. 2.1: its page is drawn by elekloader's machine-pages mod (core 3.0 or later), which elekloader ticks with it.",
+ "description": "Adds a CMI machine (FUNC+SRC list), machine 40: Digi Poly 2.1's polyphony (other tracks lend their voices; SETTINGS > POLY picks which) on SLICE's parameters, page and renderer, with velocity layers. The track's sample is a chain of equal slices, softest first; GRID sets how many (4 << GRID), and each note's velocity picks its slice through a SLICE p-lock in the note's message. Voice stealing takes the quietest voice. Conflicts with Digi Poly (same sites).",
  "sources": [
   "poly_ui.s",
   "poly_glue.s",
@@ -17,6 +17,7 @@
   "machine-pages"
  ],
  "conflicts": [
+  "digipoly",
   "dt8poly"
  ],
  "sites": [
@@ -110,7 +111,7 @@
  ],
  "resources": {
   "names": [
-   "machine:6",
+   "machine:40",
    "settings:POLY",
    "sound:slot 52 (POLY voice pool)"
   ],
@@ -187,5 +188,6 @@
     "-DOS154"
    ]
   }
- }
+ },
+ "license": "MIT"
 }
