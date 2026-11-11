@@ -67,6 +67,13 @@ int digicmi_play(int v, int play, int *win)
     if ((unsigned)v > 7)
         return play;
     eff[v] = 0;
+    if (is_cmi(v) && ((PARAM(v, 51) >> 8) & 127) >= 96) {   /* ENG = SPEC: the player loops the whole sample,
+                                                                silently, as the synth's pitch (spectral.c) */
+        win[0] = 0;
+        win[1] = (int)SLEN(v);
+        eff[v] = P_FWDL;
+        return P_FWDL;
+    }
     if ((play != P_FWDL && play != P_REVL && play != P_PP) || !is_cmi(v))
         return play;                                         /* REV, FWD and other machines: stock */
 
@@ -170,8 +177,9 @@ int digicmi_stage(int v, int word)
  * while the AMP envelope falls, so the envelope comes later and the block is still at the sample's level.
  * One 16-bit LSB of the sample is gain x 0.81 / 2^15 there, so RETRO keeps the sample's top 8 bits by
  * rounding the block down to a grid of gain x 0.81 / 2^7 (207/2^15 ~ 0.81/128, without 64-bit sums).
- * ENG = SPEC silences the voice: the spectral engine isn't built yet. */
+ * ENG = SPEC replaces the block with the spectral engine's (spectral.c); RETRO then acts on it as on a sample. */
 #define GAIN(v)  (*(volatile int *)(V(v) + 0x10))
+void spec_voice(int v, int32_t *b, int play_pos, int mode, int time, int gain, int start);
 
 /* RETRO's 24 kHz: a CMI Series I voice played its 24 kHz sample with a clock of 24 kHz x the note's pitch ratio
  * (it pitched by clock, not by resampling). Here each output value is held until the voice's playhead has moved
@@ -215,11 +223,9 @@ void digicmi_render(int32_t *blocks)
         }
         if (((PARAM(v, 50) >> 8) & 127) < 96)
             hold_last[v] = POS(v);                           /* RETRO off: keep the playhead's place */
-        if (((PARAM(v, 51) >> 8) & 127) >= 96) {             /* ENG = SPEC (switches store 0 or 127; 0.8's 64 is off) */
-            for (i = 0; i < 32; i++)
-                b[i] = 0;
-            continue;
-        }
+        if (((PARAM(v, 51) >> 8) & 127) >= 96)              /* ENG = SPEC: the spectral engine (spectral.c) */
+            spec_voice(v, b, POS(v), (PARAM(v, 18) >> 8) & 7, (PARAM(v, 23) >> 8) & 127, GAIN(v),
+                       (int)((fw_voice_start >> v) & 1));
         if (((PARAM(v, 50) >> 8) & 127) >= 96) {             /* RETRO: 24 kHz at the note's clock, 8 bits */
             int g = GAIN(v), step;
             retro_rate(v, b);
