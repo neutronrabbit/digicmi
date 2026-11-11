@@ -35,6 +35,8 @@ typedef unsigned int u32;
 #define P_FWDL     2
 #define P_REVL     1
 #define P_FWD      3
+#define P_REV      0
+#define P_PP       4                                         /* CMI's own: ping-pong */
 #define TURN_K     14
 #define MIN_LOOP   320                                       /* samples: the player keeps 141 at each end */
 #define FULL       0x7800                                    /* 120.0: STRT, LEN and LOOP's scale */
@@ -65,8 +67,8 @@ int digicmi_play(int v, int play, int *win)
     if ((unsigned)v > 7)
         return play;
     eff[v] = 0;
-    if (play != P_FWDL || !is_cmi(v))
-        return play;
+    if ((play != P_FWDL && play != P_REVL && play != P_PP) || !is_cmi(v))
+        return play;                                         /* REV, FWD and other machines: stock */
 
     u32 len = SLEN(v);
     int strt = clamp(PARAM(v, 21), 0, FULL);
@@ -74,7 +76,7 @@ int digicmi_play(int v, int play, int *win)
     int g = PARAM(v, 23);
     int loopv = g ? clamp(g - 1, 0, FULL) : strt;
     int llen = (PARAM(v, 46) >> 8) & 127, sus = ((PARAM(v, 47) >> 8) & 127) >= 64;
-    int alt = ((PARAM(v, 48) >> 8) & 127) >= 64, lfin = (PARAM(v, 49) >> 8) & 127;
+    int alt = play == P_PP, rev = play == P_REVL, lfin = (PARAM(v, 49) >> 8) & 127;
     loopv = clamp(loopv + 2 * lfin, 0, endv);                /* one LOOP step is 256: LFIN's step is 2 */
 
     int s0 = (int)scale((u32)strt, len), se = (int)scale((u32)endv, len);
@@ -98,6 +100,18 @@ int digicmi_play(int v, int play, int *win)
     } else if (fw_amp_env[3 * v] == 0)
         released[v] = 1;
 
+    if (rev) {                                               /* REV.L: the same loop, backwards from END */
+        if (sus && released[v] && !start) {                  /* SUS, let go: on down to STRT, and stop */
+            win[0] = le;
+            win[1] = s0;
+            eff[v] = P_REV;
+            return P_REV;
+        }
+        win[0] = start ? se : le;
+        win[1] = ls;
+        eff[v] = P_REVL;
+        return P_REVL;
+    }
     if (sus && released[v] && !start) {                      /* SUS, let go: on to the end, and stop there */
         win[0] = ls;
         win[1] = se;
