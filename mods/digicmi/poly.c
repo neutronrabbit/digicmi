@@ -186,66 +186,40 @@ static int holder(int p, int note)          /* the voice holding POLY track p's 
 }
 
 /* ---- digicmi: SPREAD (page 1, extra 10 = sound slot 48) ----
- * Each note a CMI track starts takes the other side from the last: a PAN (slot 45, 0-127, centre 64) p-lock
- * moved from the note's pan (its step's PAN lock, or the track's) towards hard left or right by SPREAD/127
- * (0: unchanged; 127: fully left / fully right), in the note's p-lock list, which the render puts into its voice as a
- * step's (0.1 measured: lists at +68, +0 ref count, +8 count, entries from +0x14 {u16 slot, s16 value} 8 bytes
- * apart, 106 at most; ref counted only for type 0 messages, which the message free releases). A chord's notes
- * share one list (MSG_COPY), so each copy of type 0 gets a list of its own. */
-#define LOCK_ALLOC()   ((char *)((u32 (*)(void))F_400edfe6)())
-#define LOCK_RELEASE   ((void (*)(char *))F_400ee008)
-#define LOCK_FREE_HEAD (*(volatile u32 *)F_421f6ee4)
-#define LOCK_MAX       106
+ * Each note a CMI track starts takes the other side from the last (left first): its pan (PAN is sound slot
+ * 45, 0-127, centre 64) moves from the note's own (its step's PAN lock, else the track's) towards hard left or
+ * hard right by SPREAD/127, so 127 is always fully left / fully right. The pan is kept per voice and written
+ * every audio block into the smoothed parameter block (digipoly_levels: voice v's slot k is word 9 + 53 v + k,
+ * measured in digiemu), whatever kind of message started the note (0.11 used p-lock lists, which only type 0
+ * messages could carry). */
 #define SLOT_PAN       45
 #define SLOT_SPRD      48
+#define PAN_WORD(v)    (9 + 53 * (v) + SLOT_PAN)
 static unsigned spread_side;
+static short spread_pan[8];                 /* the pan a voice's note was given; -1 none */
+static unsigned char spread_on[8];
 
 static int sound_word(const unsigned char *snd, int slot)
 {
     return *(const short *)(snd + 0x14 + 2 * slot);
 }
 
-/* A list of m's own: m's entries copied (its old reference let go), or a new empty one. 0 if there is none. */
-static char *own_list(char *m)
+static void cmi_spread(const char *m, int w, const unsigned char *snd)
 {
-    char *old = (char *)M(m, M_LOCKS), *l;
-    int i, n;
-    if (M(m, M_TYPE) != 0)
-        return old;                         /* not ref counted: edit what it has (shared, or none) */
-    if (!LOCK_FREE_HEAD || !(l = LOCK_ALLOC()))
-        return old;
-    n = old ? M(old, 8) : 0;
-    for (i = 0; i < n && i < LOCK_MAX; i++)
-        *(u32 *)(l + 0x14 + 8 * i) = *(u32 *)(old + 0x14 + 8 * i);
-    M(l, 8) = i;
-    if (old)
-        LOCK_RELEASE(old);
-    M(m, M_LOCKS) = (int)l;
-    return l;
-}
-
-static void cmi_spread(char *m, const unsigned char *snd)
-{
-    int s = (sound_word(snd, SLOT_SPRD) >> 8) & 127, pan, i, n;
-    char *l;
+    int s = (sound_word(snd, SLOT_SPRD) >> 8) & 127, pan = sound_word(snd, SLOT_PAN), i, n;
+    const char *l = (const char *)M(m, M_LOCKS);
+    if ((unsigned)w > 7)
+        return;
+    spread_on[w] = 0;
     if (!s)
         return;
-    if (!(l = own_list(m)))
-        return;
-    n = M(l, 8);
-    for (i = 0; i < n && i < LOCK_MAX; i++)
-        if (*(unsigned short *)(l + 0x14 + 8 * i) == SLOT_PAN)
-            break;
-    if (i >= LOCK_MAX)
-        return;
-    pan = i < n ? *(short *)(l + 0x16 + 8 * i) : sound_word(snd, SLOT_PAN);   /* the step's PAN lock, or the track's */
+    for (i = 0, n = l ? M(l, 8) : 0; i < n && i < 106; i++)     /* the step's own PAN lock, if any */
+        if (*(const unsigned short *)(l + 0x14 + 8 * i) == SLOT_PAN)
+            pan = *(const short *)(l + 0x16 + 8 * i);
     pan = pan < 0 ? 0 : pan > 0x7f00 ? 0x7f00 : pan;
-    /* from that pan towards hard left (0) or hard right (127) by SPREAD/127: 127 is always fully left/right */
-    pan += (((spread_side++ & 1) ? 0x7f00 : 0) - pan) * s / 127;             /* left first */
-    *(unsigned short *)(l + 0x14 + 8 * i) = SLOT_PAN;
-    *(short *)(l + 0x16 + 8 * i) = (short)pan;
-    if (i == n)
-        M(l, 8) = n + 1;
+    pan += (((spread_side++ & 1) ? 0x7f00 : 0) - pan) * s / 127;
+    spread_pan[w] = (short)pan;
+    spread_on[w] = 1;
 }
 
 void digipoly_route_c(char *m, u32 busy, const char *fp)
@@ -283,7 +257,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
             return;
         started[v] = ++clock;
         if (kit && kit[0x9e + v * 0xa2] == POLY && ((tag >> 24) & 0xff) != TAG_COPY)
-            cmi_spread(m, kit + 0x20 + v * 0xa2);   /* digicmi: the trig's own note */
+            cmi_spread(m, v, kit + 0x20 + v * 0xa2);   /* digicmi: the trig's own note, on its voice */
         if ((tag >> 24) != TAG || !is_poly(kit, v) || muted(v, fp))
             return;
         used = (1u << v) | busy;
@@ -309,7 +283,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
             M(c, M_FLAGS) |= 0x10000;       /* the pitch is the message's note */
             M(c, M_NEXT) = M(m, M_NEXT);
             M(m, M_NEXT) = (int)c;
-            cmi_spread(c, kit + 0x20 + v * 0xa2);   /* digicmi: each chord note its own side */
+            cmi_spread(c, w, kit + 0x20 + v * 0xa2);   /* digicmi: each chord note its own side */
             used |= 1u << w;
         }
         return;
@@ -338,7 +312,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
         dt8poly_vstate[w] = n;
         started[w] = ++clock;
         if (kit[0x9e + v * 0xa2] == POLY)
-            cmi_spread(m, kit + 0x20 + v * 0xa2);   /* digicmi: a live note */
+            cmi_spread(m, w, kit + 0x20 + v * 0xa2);   /* digicmi: a live note, on voice w */
     } else {
         w = holder(v, n);
         if (w >= 0) {
@@ -402,9 +376,17 @@ void digipoly_levels(short *words)
 {
     const unsigned char *kit = ENGINE_KIT;
     int w, p;
-    for (w = 0; w < 8; w++)
+    for (w = 0; w < 8; w++) {
         if ((p = owner_of(w, kit)) >= 0)
             words[w] = words[p];
+        if (spread_on[w]) {                 /* digicmi: SPREAD, while the voice still plays a CMI sound */
+            u32 snd = LOADED[w];
+            if (snd >= 0x40000000u && *(volatile unsigned char *)(snd + 0x7e) == POLY)
+                words[PAN_WORD(w)] = spread_pan[w];
+            else
+                spread_on[w] = 0;
+        }
+    }
 }
 
 /* ---- TRIG page ---- */
