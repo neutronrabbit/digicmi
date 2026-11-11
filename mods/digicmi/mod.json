@@ -1,12 +1,12 @@
 {
  "id": "digicmi",
- "version": "0.7",
+ "version": "0.8",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "digicmi (from gdeo607 Digi Poly 2.1, MIT)",
  "device": "digitakt-mk1",
  "os": "1.53",
- "description": "Adds a CMI machine (FUNC+SRC list), machine 40: one sample played polyphonically from MIDI note 60 on ONESHOT's player. SETTINGS > 8 TRACK POLY makes track 1 one 8-voice instrument (overriding every track's machine; tracks 2-8's trigs are silent; hold FUNC and the track keys turn blue). Page 1: TUNE, 8BIT (the sample at 8 bits), ENG (SAMPLE, or SPECTRAL: not built yet), SAMP, LEV. Page 2 (SRC again; machine-pages 1.11): the stock ONESHOT waveform view with PLAY (REV, REV.L, FWD.L, FWD, P = ping-pong), LLEN, LMOD (HOLD/SUS), LFIN / STRT, LEN, LOOP, LEV; loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Velocity sets volume; stealing takes the quietest voice. Conflicts with Digi Poly, DIGISLICER, Digi EQ and Digi Matrix.",
+ "description": "Adds a CMI machine (FUNC+SRC list), machine 40: one sample played polyphonically from MIDI note 60 on ONESHOT's player. SETTINGS > 8 TRACK POLY makes track 1 one 8-voice instrument (overriding every track's machine; tracks 2-8's trigs are silent; hold FUNC and the track keys turn blue). Page 1: TUNE, 8BIT and ENG switches (8-bit sample; SAMPLE or SPECTRAL, not built yet), SAMP, LEV. Page 2 (SRC again): a Digitakt II-style waveform page with PLAY (REV, REV.L, FWD.L, FWD, P = ping-pong), LLEN, LMOD (HOLD/SUS), LFIN / STRT, LEN, LOOP, LEV; loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Velocity sets volume; stealing takes the quietest voice. Conflicts with Digi Poly, DIGISLICER, Digi EQ and Digi Matrix.",
  "sources": [
   "poly_ui.s",
   "poly_glue.s",
@@ -142,6 +142,11 @@
    "event": "ev_render_voices",
    "fn": "digicmi_render",
    "order": 70
+  },
+  {
+   "event": "ev_draw",
+   "fn": "digicmi_wave_draw",
+   "order": 60
   }
  ],
  "resources": {

@@ -113,7 +113,8 @@ static struct kstore store;
  * (the kits are all in RAM and saved with the project; bit 7 was Digi Poly's per-track pool). */
 #define POLY8_N 45
 static unsigned char poolmask(int n) { return n == POLY8_N ? 0x01 : 0; }
-unsigned char digicmi_poly8;                /* the mode, as of the last UI tick */
+unsigned char digicmi_poly8;
+void digicmi_switch_tick(void);                /* the mode, as of the last UI tick */
 #ifdef OS154
 #define FUNC_HELD (*(volatile int *)0x4217bbb4)   /* the panel's FUNC key, kept by its key scan (0x400d3cce) */
 #else
@@ -546,6 +547,7 @@ void digipoly_rectick(void *ctrl)
     (void)ctrl;
     kstore_tick(&store, UI_KIT, KS_SLOT_POLY, poolmask);   /* a sound loaded onto a track keeps the mode's bit */
     digicmi_poly8 = XB((unsigned char *)KS_KIT0, POLY8_N) & 1;
+    digicmi_switch_tick();                  /* cmi_page.c: 8BIT and ENG flip with one notch */
     if (digicmi_poly8 && UI_KIT && UI_KIT[0x9e] != POLY) {     /* overriding the machine menu on track 1 */
         UI_KIT[0x9e] = POLY;
         ks_persist(UI_KIT, 0);
