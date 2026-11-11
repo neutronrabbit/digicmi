@@ -25,6 +25,9 @@
 #define EX_8BIT 12
 #define EX_ENG  13
 #define EX_SPRD 10
+#ifndef CMI_SPECTRAL
+#define CMI_SPECTRAL 0                          /* the spectral engine (0.15) is paused, untested */
+#endif
 #define EX_FORM 8                               /* the spectral engine's FORMANT (slot 46, 0.3-0.12's LLEN) */
 #define P_BR    0x86                            /* BR's parameter id: the look of a plain 0..127 knob */
 #define B       CM_SRC_BLANK
@@ -275,7 +278,9 @@ static void vbox(void *bmp, int k, const char *s, int dotted_frame)
 void digicmi_page_tick(void *ctrl)
 {
     static int was;
+#if CMI_SPECTRAL
     digicmi_spec_tick();                        /* spectral.c: the tables, when track 1's settings change */
+#endif
     int v, pos, any = 0;
     uint32_t vl;
     if (page2_age < 1000)

@@ -26,6 +26,9 @@
 typedef unsigned int u32;
 
 #define CMI_ID     40
+#ifndef CMI_SPECTRAL
+#define CMI_SPECTRAL 0                                       /* the spectral engine (0.15) is paused, untested */
+#endif
 #define V(v)       (0x8000EDC4u + 94u * (u32)(v))           /* a voice's player state */
 #define POS(v)     (*(volatile int *)(V(v) + 4))             /* its playhead, in samples */
 #define SLEN(v)    (*(volatile u32 *)(V(v) + 0x14))          /* its sample's length, in samples */
@@ -223,9 +226,16 @@ void digicmi_render(int32_t *blocks)
         }
         if (((PARAM(v, 50) >> 8) & 127) < 96)
             hold_last[v] = POS(v);                           /* RETRO off: keep the playhead's place */
-        if (((PARAM(v, 51) >> 8) & 127) >= 96)              /* ENG = SPEC: the spectral engine (spectral.c) */
+        if (((PARAM(v, 51) >> 8) & 127) >= 96) {            /* ENG = SPEC: the spectral engine (spectral.c) */
+#if CMI_SPECTRAL
             spec_voice(v, b, POS(v), (PARAM(v, 18) >> 8) & 7, (PARAM(v, 23) >> 8) & 127, GAIN(v),
                        (int)((fw_voice_start >> v) & 1));
+#else
+            for (i = 0; i < 32; i++)                        /* paused (untested): SPEC voices are silent */
+                b[i] = 0;
+            continue;
+#endif
+        }
         if (((PARAM(v, 50) >> 8) & 127) >= 96) {             /* RETRO: 24 kHz at the note's clock, 8 bits */
             int g = GAIN(v), step;
             retro_rate(v, b);
@@ -240,10 +250,15 @@ void digicmi_render(int32_t *blocks)
     }
 }
 
-/* The page's playheads (cmi_page.c): voice v's position and its sample's length, if it is a sounding CMI voice. */
+/* The page's playheads (cmi_page.c): voice v's position and its sample's length, while it is a CMI voice whose
+ * AMP envelope is still above silence (a looping voice runs on after it has faded). */
 int digicmi_voice_pos(int v, int *pos, u32 *len)
 {
+    int lvl;
     if ((unsigned)v > 7 || !*(volatile unsigned char *)(V(v) + 0x28) || !is_cmi(v))
+        return 0;
+    lvl = fw_amp_env[3 * v + 1];                             /* negated Q31; 0 silent */
+    if (lvl > -0x100000)                                     /* the AMP envelope has (all but) finished */
         return 0;
     *pos = POS(v);
     *len = SLEN(v);

@@ -187,12 +187,12 @@ static int holder(int p, int note)          /* the voice holding POLY track p's 
 
 /* ---- digicmi: SPREAD (page 1, extra 10 = sound slot 48) ----
  * Each note a CMI track starts takes the other side from the last (left first): its pan (PAN is sound slot
- * 45, 0-127, centre 64) moves from the note's own (its step's PAN lock, else the track's) towards hard left or
+ * 44, 0-127, centre 64; slot 45 is VOL: 0.11-0.14 wrote 45 and so set alternate notes' volume to 0 or 127) moves from the note's own (its step's PAN lock, else the track's) towards hard left or
  * hard right by SPREAD/127, so 127 is always fully left / fully right. The pan is kept per voice and written
  * every audio block into the smoothed parameter block (digipoly_levels: voice v's slot k is word 9 + 53 v + k,
  * measured in digiemu), whatever kind of message started the note (0.11 used p-lock lists, which only type 0
  * messages could carry). */
-#define SLOT_PAN       45
+#define SLOT_PAN       44
 #define SLOT_SPRD      48
 #define PAN_WORD(v)    (9 + 53 * (v) + SLOT_PAN)
 static unsigned spread_side;
