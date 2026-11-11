@@ -149,3 +149,37 @@ int digicmi_stage(int v, int word)
         return word;
     return (word & 0xff) | (eff[v] << 8);
 }
+
+/* ---- the voices' sound, after playback, before the AMP envelope (machine-pages' ev_render_voices) ----
+ * fw_track_blocks[v] (32 Q31 samples, voice v = track v) is the voice's sample scaled by its gain (V(v) +
+ * 0x10, velocity^2 x volume): measured in digiemu, the block's peak stays 0.81 x gain x the sample's peak
+ * while the AMP envelope falls, so the envelope comes later and the block is still at the sample's level.
+ * One 16-bit LSB of the sample is gain x 0.81 / 2^15 there, so 8BIT keeps the sample's top 8 bits by
+ * rounding the block down to a grid of gain x 0.81 / 2^7 (207/2^15 ~ 0.81/128, without 64-bit sums).
+ * ENG = SPEC silences the voice: the spectral engine isn't built yet. */
+#define GAIN(v)  (*(volatile int *)(V(v) + 0x10))
+
+void digicmi_render(int32_t *blocks)
+{
+    int v, i;
+    for (v = 0; v < 8; v++) {
+        int32_t *b = blocks + 32 * v;
+        if (!is_cmi(v))
+            continue;
+        if (((PARAM(v, 51) >> 8) & 127) >= 64) {             /* ENG = SPEC */
+            for (i = 0; i < 32; i++)
+                b[i] = 0;
+            continue;
+        }
+        if (((PARAM(v, 50) >> 8) & 127) >= 64) {             /* 8BIT */
+            int g = GAIN(v), step;
+            if (g <= 0)
+                continue;
+            step = (int)((((u32)g >> 8) * 207u) >> 7);
+            if (step <= 0)
+                continue;
+            for (i = 0; i < 32; i++)
+                b[i] -= b[i] % step;                         /* towards zero, as an 8-bit sample truncates */
+        }
+    }
+}

@@ -1,12 +1,12 @@
 {
  "id": "digicmi",
- "version": "0.5",
+ "version": "0.6",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "digicmi (from gdeo607 Digi Poly 2.1, MIT)",
  "device": "digitakt-mk1",
  "os": "1.53",
- "description": "Adds a CMI machine (FUNC+SRC list), machine 40: Digi Poly 2.1's polyphony on ONESHOT, with CMI-style loop controls. The track plays one one-shot sample polyphonically, pitched from MIDI note 60, borrowing all eight voices when SETTINGS > 8 TRACK POLY is on (which overrides every track's machine and silences tracks 2-8's own trigs; hold FUNC and the track keys turn blue). Velocity sets each voice's volume. Page 2 (SRC again), with PLAY = FWD.L: LLEN loop length (0 = to the end), LMOD HOLD/SUS (SUS: loop while held, then play on to the end), DIR FWD/ALT (ping-pong), LFIN fine loop start; CCs 24-27. Loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Voice stealing takes the quietest voice. Conflicts with Digi Poly and DIGISLICER (same sites). The loop page's lower half shows the sample's waveform with STRT, END and loop markers.",
+ "description": "Adds a CMI machine (FUNC+SRC list), machine 40: one sample played polyphonically from MIDI note 60 on ONESHOT's player. SETTINGS > 8 TRACK POLY makes track 1 one 8-voice instrument (overriding every track's machine; tracks 2-8's trigs are silent; hold FUNC and the track keys turn blue). Page 1: TUNE, 8BIT (the sample at 8 bits), ENG (SAMPLE, or SPECTRAL: not built yet), SAMP, LEV. Page 2: the sample's waveform full screen with STRT, LEN, LOOP, LFIN / LLEN, LMOD (HOLD/SUS), DIR (FWD/ALT), PLAY as text; loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Velocity sets volume; stealing takes the quietest voice. Conflicts with Digi Poly, DIGISLICER, Digi EQ and Digi Matrix.",
  "sources": [
   "poly_ui.s",
   "poly_glue.s",
@@ -20,6 +20,8 @@
   "machine-pages"
  ],
  "conflicts": [
+  "digieq",
+  "digimatrix",
   "digipoly",
   "digislicer",
   "dt8poly"
@@ -140,6 +142,11 @@
    "event": "ev_draw",
    "fn": "digicmi_wave_draw",
    "order": 60
+  },
+  {
+   "event": "ev_render_voices",
+   "fn": "digicmi_render",
+   "order": 70
   }
  ],
  "resources": {
