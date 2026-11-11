@@ -1,6 +1,6 @@
 /* digicmi: the CMI machine's two SRC pages (machine-pages 1.4+, cm_ui_v33).
  *
- * Page 1 "CMI":       A TUNE, B 8BIT (switch), C ENG (switch), D SAMP / E-G blank, H LEV.
+ * Page 1 "CMI":       A TUNE, B RETRO (switch), C ENG (switch), D SAMP / E SPRD, F-G blank, H LEV.
  * Page 2 "CMI LOOP":  drawn here in the Digitakt II's waveform-page style (digicmi_wave_draw): value boxes
  *                     for A PLAY, (B empty), C LMOD, D LFIN along the top, the sample's waveform with dotted
  *                     STRT, END, loop-start and loop-end marks, and E STRT, F LEN, G LOOP, H LEV (a slider)
@@ -11,7 +11,8 @@
  *   (LLEN, extra 8 / slot 46: on no page since 0.13; the loop runs from LOOP to END)
  *   LMOD  HOLD (loops on after release) or SUS (loops while held, then plays on to the end, or the start)
  *   LFIN  fine loop start: one LOOP step divided into 128
- *   8BIT  a switch: the sample played at 8 bits (cmi_loop.c, digicmi_render)
+ *   RETRO a switch: the sample as a CMI Series I voice plays it: 8 bits at 24 kHz, its clock following the
+ *         note's pitch (cmi_loop.c, digicmi_render)
  *   ENG   a switch: SMPL, or SPEC (the spectral synth, not built yet: its voices are silent)
  * The two switches are 0 (off) or 127 (on): a turn either way flips them at once (poly.c, digipoly_setparam,
  * snaps the value the knob sends; machine-pages wants every extra 0-127). Extra 10 (slot 48, once DIR) and 14 (slot
@@ -75,10 +76,10 @@ static int32_t fmt_num(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
-static int32_t fmt_8bit(char *buf, int32_t v, int32_t ctx, int32_t m)
+static int32_t fmt_retro(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
     (void)m;
-    put_s(buf, ((v >> 8) & 127) < 96 ? "OFF" : (ctx ? "ON: 8-BIT" : "ON"));
+    put_s(buf, ((v >> 8) & 127) < 96 ? "OFF" : (ctx ? "8-BIT 24KHZ" : "ON"));
     return 1;
 }
 
@@ -359,8 +360,8 @@ const struct cm_ui32 digicmi_page = {
           .cc = 25, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_lmod, .draw = lmod_draw },
         EXTRA("SPRD", "Stereo Spread", 0, fmt_sprd, 26),     /* slot 48 (0.3-0.6's DIR): cmi_loop.c */
         EXTRA("LFIN", "Loop Start Fine", 0, fmt_num, 27),
-        { .name = "8BIT", .lname = "8-Bit Sample", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
-          .cc = 28, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_8bit, .draw = switch_draw },
+        { .name = "RETRO", .lname = "Retro", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
+          .cc = 28, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_retro, .draw = switch_draw },
         { .name = "ENG", .lname = "Engine", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 29, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_eng, .draw = switch_draw },
         /* 14: on no page, but machine-pages refuses the whole page unless all seven are valid. It is slot 52,

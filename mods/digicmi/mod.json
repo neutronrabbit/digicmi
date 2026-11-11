@@ -1,12 +1,12 @@
 {
  "id": "digicmi",
- "version": "0.13",
+ "version": "0.14",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "digicmi (from gdeo607 Digi Poly 2.1, MIT)",
  "device": "digitakt-mk1",
  "os": "1.53",
- "description": "Adds a CMI machine (FUNC+SRC list), machine 40: one sample played polyphonically from MIDI note 60 on ONESHOT's player. CMI can only be chosen on track 1, and there it makes track 1 one 8-voice instrument: tracks 2-8 become its voices (their machines can't be changed and their trigs are silent until track 1 is another machine); hold FUNC and the track keys turn blue. Page 1: TUNE, 8BIT and ENG switches (8-bit sample; SAMPLE or SPECTRAL, not built yet), SAMP / SPRD (stereo spread: notes alternate left and right, full at 127), LEV. Page 2 (SRC again): a Digitakt II-style waveform page with each sounding note's playhead with PLAY (REV, REV.L, FWD.L, FWD, P = ping-pong), LMOD (HOLD/SUS), LFIN / STRT, LEN, LOOP (the loop runs from LOOP to the sample's END); loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Velocity sets volume; stealing takes the quietest voice. Conflicts with Digi Poly, DIGISLICER, Digi EQ and Digi Matrix.",
+ "description": "Adds a CMI machine (FUNC+SRC list), machine 40: one sample played polyphonically from MIDI note 60 on ONESHOT's player. CMI can only be chosen on track 1, and there it makes track 1 one 8-voice instrument: tracks 2-8 become its voices (their machines can't be changed and their trigs are silent until track 1 is another machine); hold FUNC and the track keys turn blue. Page 1: TUNE, RETRO and ENG switches (RETRO: the sample as a CMI Series I voice plays it, 8 bits at 24 kHz with the clock following pitch; ENG: SAMPLE or SPECTRAL, not built yet), SAMP / SPRD (stereo spread: notes alternate left and right, full at 127), LEV. Page 2 (SRC again): a Digitakt II-style waveform page with each sounding note's playhead with PLAY (REV, REV.L, FWD.L, FWD, P = ping-pong), LMOD (HOLD/SUS), LFIN / STRT, LEN, LOOP (the loop runs from LOOP to the sample's END); loop points follow knobs, locks and LFOs while notes play, and a higher note loops faster. Velocity sets volume; stealing takes the quietest voice. Conflicts with Digi Poly, DIGISLICER, Digi EQ and Digi Matrix.",
  "sources": [
   "poly_ui.s",
   "poly_glue.s",

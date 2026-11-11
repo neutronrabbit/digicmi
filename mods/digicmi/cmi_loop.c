@@ -168,25 +168,61 @@ int digicmi_stage(int v, int word)
  * fw_track_blocks[v] (32 Q31 samples, voice v = track v) is the voice's sample scaled by its gain (V(v) +
  * 0x10, velocity^2 x volume): measured in digiemu, the block's peak stays 0.81 x gain x the sample's peak
  * while the AMP envelope falls, so the envelope comes later and the block is still at the sample's level.
- * One 16-bit LSB of the sample is gain x 0.81 / 2^15 there, so 8BIT keeps the sample's top 8 bits by
+ * One 16-bit LSB of the sample is gain x 0.81 / 2^15 there, so RETRO keeps the sample's top 8 bits by
  * rounding the block down to a grid of gain x 0.81 / 2^7 (207/2^15 ~ 0.81/128, without 64-bit sums).
  * ENG = SPEC silences the voice: the spectral engine isn't built yet. */
 #define GAIN(v)  (*(volatile int *)(V(v) + 0x10))
+
+/* RETRO's 24 kHz: a CMI Series I voice played its 24 kHz sample with a clock of 24 kHz x the note's pitch ratio
+ * (it pitched by clock, not by resampling). Here each output value is held until the voice's playhead has moved
+ * two samples of the 48 kHz sample, one 24 kHz sample: at the root a value lasts two output samples, higher
+ * notes less, and from an octave up none. The ratio is the playhead's own move this block (TUNE, bends and LFOs
+ * in), in 16.16 per output sample. */
+#define HOLD_STEP  0x20000                                   /* two samples of the sample */
+static int32_t hold_val[8];
+static u32 hold_phase[8], hold_inc[8];
+static int hold_last[8];
+
+static void retro_rate(int v, int32_t *b)
+{
+    int pos = POS(v), adv = pos - hold_last[v], i;
+    if (adv < 0)
+        adv = -adv;
+    hold_last[v] = pos;
+    if ((fw_voice_start >> v) & 1) {                         /* a new note: its first value at once */
+        hold_phase[v] = HOLD_STEP;
+        hold_inc[v] = 0x10000;
+    } else if (adv > 0 && adv < 4096)                        /* not a loop's wrap or a jump */
+        hold_inc[v] = (u32)adv << 11;                        /* adv / 32 output samples, 16.16 */
+    for (i = 0; i < 32; i++) {
+        hold_phase[v] += hold_inc[v];
+        if (hold_phase[v] >= HOLD_STEP) {
+            hold_phase[v] %= HOLD_STEP;
+            hold_val[v] = b[i];
+        }
+        b[i] = hold_val[v];
+    }
+}
 
 void digicmi_render(int32_t *blocks)
 {
     int v, i;
     for (v = 0; v < 8; v++) {
         int32_t *b = blocks + 32 * v;
-        if (!is_cmi(v))
+        if (!is_cmi(v)) {
+            hold_last[v] = POS(v);
             continue;
+        }
+        if (((PARAM(v, 50) >> 8) & 127) < 96)
+            hold_last[v] = POS(v);                           /* RETRO off: keep the playhead's place */
         if (((PARAM(v, 51) >> 8) & 127) >= 96) {             /* ENG = SPEC (switches store 0 or 127; 0.8's 64 is off) */
             for (i = 0; i < 32; i++)
                 b[i] = 0;
             continue;
         }
-        if (((PARAM(v, 50) >> 8) & 127) >= 96) {             /* 8BIT */
+        if (((PARAM(v, 50) >> 8) & 127) >= 96) {             /* RETRO: 24 kHz at the note's clock, 8 bits */
             int g = GAIN(v), step;
+            retro_rate(v, b);
             if (g <= 0)
                 continue;
             step = (int)((((u32)g >> 8) * 207u) >> 7);
