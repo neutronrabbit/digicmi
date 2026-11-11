@@ -75,14 +75,14 @@ static int32_t fmt_num(char *buf, int32_t v, int32_t ctx, int32_t m)
 static int32_t fmt_8bit(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
     (void)m;
-    put_s(buf, ((v >> 8) & 127) < 64 ? "OFF" : (ctx ? "ON: 8-BIT" : "ON"));
+    put_s(buf, ((v >> 8) & 127) < 96 ? "OFF" : (ctx ? "ON: 8-BIT" : "ON"));
     return 1;
 }
 
 static int32_t fmt_eng(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
     (void)m;
-    put_s(buf, ((v >> 8) & 127) < 64 ? (ctx ? "SAMPLE" : "SMPL") : (ctx ? "SPECTRAL (NOT BUILT)" : "SPEC"));
+    put_s(buf, ((v >> 8) & 127) < 96 ? (ctx ? "SAMPLE" : "SMPL") : (ctx ? "SPECTRAL (NOT BUILT)" : "SPEC"));
     return 1;
 }
 
@@ -117,7 +117,7 @@ static int32_t fmt_play(char *buf, int32_t v, int32_t ctx, int32_t m)
 /* A toggle drawn in the knob's 17 x 17 place (x + 1 .. x + 17, y .. y + 16; y = 0 is the bottom row). */
 static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t flag)
 {
-    int on = ((value >> 8) & 127) >= 64, x0 = x + 2, x1 = x + 16, y0 = y + 5, y1 = y + 11;
+    int on = ((value >> 8) & 127) >= 96, x0 = x + 2, x1 = x + 16, y0 = y + 5, y1 = y + 11;
     (void)flag;
     fw_fillrect(bmp, x0 + 1, y0, x1 - 1, y0, 1);                /* a rounded outline */
     fw_fillrect(bmp, x0 + 1, y1, x1 - 1, y1, 1);

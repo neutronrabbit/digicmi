@@ -180,12 +180,12 @@ void digicmi_render(int32_t *blocks)
         int32_t *b = blocks + 32 * v;
         if (!is_cmi(v))
             continue;
-        if (((PARAM(v, 51) >> 8) & 127) >= 64) {             /* ENG = SPEC */
+        if (((PARAM(v, 51) >> 8) & 127) >= 96) {             /* ENG = SPEC (switches store 0 or 127; 0.8's 64 is off) */
             for (i = 0; i < 32; i++)
                 b[i] = 0;
             continue;
         }
-        if (((PARAM(v, 50) >> 8) & 127) >= 64) {             /* 8BIT */
+        if (((PARAM(v, 50) >> 8) & 127) >= 96) {             /* 8BIT */
             int g = GAIN(v), step;
             if (g <= 0)
                 continue;

@@ -139,37 +139,6 @@ digipoly_prevoff_hook:                          | 3 arguments (track, note, 0x40
         lea     12(%sp), %sp
         rts
 
-| ---------------- SETTINGS: the POLY row (which tracks lend their voice) --------------------------------------------------
-        .globl  digipoly_settings
-digipoly_settings:
-        pea     row_poly
-        move.l  8(%sp), -(%sp)                  | the menu
-        jsr     core_additem
-        addq.l  #8, %sp
-        rts
-
-| label: builds the std::string in a0
-row_label:
-        link    %a6, #-4
-        move.l  %d2, -(%sp)
-        pea     -1(%a6)
-        pea     str_row
-        move.l  %a0, %d2
-        move.l  %a0, -(%sp)
-        jsr     .LF_4017ac20                      | std::string(this, const char*, alloc&)
-        lea     12(%sp), %sp
-        move.l  %d2, %d0
-        move.l  -8(%a6), %d2
-        unlk    %a6
-        rts
-
-        .balign 4
-row_poly:
-        .long   row_label, digipoly_select, digipoly_draw, digipoly_change
-str_row:
-        .asciz  "8 TRACK POLY"
-        .balign 2
-
 | ---------------- recording a live note: the tail of the record path (0x400d55c6) -----------------
 | In liveNoteOn, right after the trig has been recorded (jsr 0x4006f46e). Replaces
 | "lea (24,sp),sp; adda.l a5,a2": a2 is the pattern's data, a5 = 911 * track, so after the adda a2 is

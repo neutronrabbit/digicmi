@@ -109,11 +109,10 @@ typedef unsigned int u32;
 #include "kitstore.h"
 #define POOLOUT(kit, t) XB(kit, 6 * (t) + 3)   /* bit 7: track t is kept out of the POLY pool */
 static struct kstore store;
-/* digicmi: 8 TRACK POLY, all or nothing: bit 0 of track 8's byte 6t + 3 in every pattern's kit, read from kit 0
- * (the kits are all in RAM and saved with the project; bit 7 was Digi Poly's per-track pool). */
-#define POLY8_N 45
-static unsigned char poolmask(int n) { return n == POLY8_N ? 0x01 : 0; }
-unsigned char digicmi_poly8;                /* the mode, as of the last UI tick */
+/* digicmi: CMI on track 1 is the 8-voice instrument (0.10; the SETTINGS row of 0.5-0.9 is gone). The kit
+ * bytes 0.5-0.9 used (bit 0 of byte 45) are no longer read; kitstore keeps only its markers. */
+static unsigned char poolmask(int n) { (void)n; return 0; }
+unsigned char digicmi_poly8;                /* track 1 is CMI, as of the last UI tick (LEDs, tests) */
 #ifdef OS154
 #define FUNC_HELD (*(volatile int *)0x4217bbb4)   /* the panel's FUNC key, kept by its key scan (0x400d3cce) */
 #else
@@ -127,7 +126,7 @@ static u32 started[8], clock;             /* voice -> clock at its last note sta
 
 static int is_poly(const unsigned char *kit, int t)
 {
-    return digicmi_poly8 && kit && t == 0;   /* digicmi: track 1 is the instrument, whatever its machine */
+    return kit && t == 0 && kit[0x9e] == POLY;   /* digicmi: CMI on track 1 is the 8-voice instrument */
 }
 
 static int muted(int v, const char *fp)
@@ -191,7 +190,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
     if ((unsigned)v > 7)
         return;
 
-    if (digicmi_poly8 && v != 0) {          /* digicmi: one instrument, on track 1 */
+    if (is_poly(kit, 0) && v != 0) {        /* digicmi: one instrument, on track 1 */
         if (id == 1 && ((u32)M(m, M_CHORD) >> 24) != TAG_COPY) {
             char *l = (char *)M(m, M_LOCKS);
             M(m, M_ID) = -1;                /* tracks 2-8's own trigs are silent, */
@@ -368,30 +367,31 @@ void digipoly_trigkind(char *view)
 /* ---- SETTINGS > POLY: the tracks 1..8 that lend their voice ----
  * LEFT/RIGHT choose a track, YES takes it out of the pool or puts it back. The checkbox shows the chosen
  * track's state: ticked = its voice is in the POLY pool. A track in the pool is shown inverted. */
-void digipoly_select(void **payload)
+/* ---- digicmi: machines. CMI only on track 1; while track 1 is CMI, tracks 2-8 keep their machines ----
+ * The firmware's one machine setter 0x400225ca(object, machine, flag) returns 1 when it takes the change and
+ * 0 when it refuses; the object's vtable +40 gives the sound. cmi_loop.s asks digicmi_machine_ok first. */
+int digicmi_machine_ok(void **obj, int machine)
 {
-    unsigned on = !digicmi_poly8, p;
-    for (p = 0; p < KS_PATTERNS; p++) {     /* every pattern's kit, into the unit's non-volatile mirror */
-        unsigned char *kit = (unsigned char *)(KS_KIT0 + p * KS_KIT_STEP);
-        XB(kit, POLY8_N) = (unsigned char)((XB(kit, POLY8_N) & ~1) | on);
-        ks_persist(kit, 7);
-    }
-    digicmi_poly8 = (unsigned char)on;
-    INVALIDATE((char *)*payload + 0x38);
+    unsigned char *kit = UI_KIT, *snd;
+    u32 d;
+    int t;
+    if (!kit || !obj)
+        return 1;
+    snd = ((unsigned char *(*)(void *))((u32 *)*obj)[10])(obj);
+    d = (u32)snd - (u32)(kit + 0x20);
+    if (!snd || d % 0xa2 || d / 0xa2 > 7)
+        return 1;                           /* not a track of the UI kit */
+    t = (int)(d / 0xa2);
+    if (machine == snd[0x7e])
+        return 1;                           /* no change */
+    if (machine == POLY && t != 0)
+        return 0;                           /* CMI: track 1 only */
+    if (t != 0 && kit[0x9e] == POLY)
+        return 0;                           /* track 1 is CMI: tracks 2-8 are its voices */
+    return 1;
 }
 
-void digipoly_change(void **payload, int unused, int delta)
-{
-    (void)payload; (void)unused; (void)delta;
-}
-
-void digipoly_draw(void *a, void *b, void *bmp, int x, int y)
-{
-    (void)a; (void)b;
-    BLIT(bmp, CHECKBOXES + (digicmi_poly8 ? 0x1c : 0), x, y, 0);
-}
-
-/* ---- digicmi: while FUNC is held in 8 TRACK POLY, the eight track keys are blue ----
+/* ---- digicmi: while FUNC is held and track 1 is CMI, the eight track keys are blue ----
  * The UI's LED frame clears the LedManager, the views set theirs (the first setter of an LED wins, by
  * mgr + 44 + 4 led), then 0x40008476 fills the rest and sends them; cmi_loop.s comes here first, so these
  * clear that mark and take the LED. Colour 0x13 in mode 2 is the keyboard's blue (0x40029848). */
@@ -554,7 +554,7 @@ void digipoly_rectick(void *ctrl)
     int t;
     (void)ctrl;
     kstore_tick(&store, UI_KIT, KS_SLOT_POLY, poolmask);   /* a sound loaded onto a track keeps the mode's bit */
-    digicmi_poly8 = XB((unsigned char *)KS_KIT0, POLY8_N) & 1;
+    digicmi_poly8 = (unsigned char)is_poly(UI_KIT, 0);
     for (t = 0; t < 8; t++)
         if (rec_age[t] > 0 && --rec_age[t] == 0)
             rec_n[t] = 0;

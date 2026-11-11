@@ -65,3 +65,19 @@ digicmi_leds_s:
         lea     -12(%sp), %sp
         movem.l %d2/%a2-%a3, (%sp)
         jmp     0x4000847e
+
+| 0x400225ca: the machine setter's entry (was: lea -28(sp),sp ; movem.l d2-d5/a2-a4,(sp); 8 bytes, by jmp).
+| digicmi_machine_ok(object, machine) == 0 refuses the change as the setter does (d0 = 0), else the setter
+| runs as it was.
+        .globl  digicmi_mset_s
+digicmi_mset_s:
+        move.l  8(%sp), -(%sp)                  | machine
+        move.l  8(%sp), -(%sp)                  | object
+        jsr     digicmi_machine_ok
+        addq.l  #8, %sp
+        tst.l   %d0
+        bne.s   1f
+        rts                                     | refused: d0 = 0
+1:      lea     -28(%sp), %sp
+        movem.l %d2-%d5/%a2-%a4, (%sp)
+        jmp     0x400225d2
