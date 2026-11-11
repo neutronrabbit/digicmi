@@ -2,13 +2,13 @@
  *
  * Page 1 "CMI":       A TUNE, B 8BIT (switch), C ENG (switch), D SAMP / E-G blank, H LEV.
  * Page 2 "CMI LOOP":  drawn here in the Digitakt II's waveform-page style (digicmi_wave_draw): value boxes
- *                     for A PLAY, B LLEN, C LMOD, D LFIN along the top, the sample's waveform with dotted
+ *                     for A PLAY, (B empty), C LMOD, D LFIN along the top, the sample's waveform with dotted
  *                     STRT, END, loop-start and loop-end marks, and E STRT, F LEN, G LOOP, H LEV (a slider)
  *                     along the bottom. The page's SMP box and LEV fader stay on the left.
  * PLAY: REV, REV.L, FWD.L, FWD, and P (ping-pong between the loop points; cmi_loop.c). TUNE, PLAY, SAMP,
  * STRT, LEN, LOOP and LEV are the sound's slots 17-24 (ONESHOT's meaning: CMI renders as ONESHOT). The rest
  * are machine-pages' extra values in slots 46-51 (p-locks, LFOs, copy/paste, the project save):
- *   LLEN  loop length: 0 = to the end (the stock loop), else LOOP + LLEN/128 of the sample
+ *   (LLEN, extra 8 / slot 46: on no page since 0.13; the loop runs from LOOP to END)
  *   LMOD  HOLD (loops on after release) or SUS (loops while held, then plays on to the end, or the start)
  *   LFIN  fine loop start: one LOOP step divided into 128
  *   8BIT  a switch: the sample played at 8 bits (cmi_loop.c, digicmi_render)
@@ -46,17 +46,6 @@ static char *put_u(char *b, unsigned v)
         *b++ = t[--n];
     *b = 0;
     return b;
-}
-
-static int32_t fmt_llen(char *buf, int32_t v, int32_t ctx, int32_t m)
-{
-    (void)m;
-    v = (v >> 8) & 127;
-    if (v)
-        put_u(buf, (unsigned)v);
-    else
-        put_s(buf, ctx ? "TO END" : "END");
-    return 1;
 }
 
 static int32_t fmt_lmod(char *buf, int32_t v, int32_t ctx, int32_t m)
@@ -149,7 +138,7 @@ static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32
 }
 
 /* ---- page 2: the Digitakt II-style waveform page ------------------------------------------------ *
- * LLEN's knob exists only on page 2, so its graphic's callback says the page is being drawn and takes the
+ * LMOD's knob exists only on page 2, so its graphic's callback says the page is being drawn and takes the
  * values it shows (a held step's locks included); ev_draw, after the frame is composed, paints the page
  * over the knobs (x 22 on; the SMP box and LEV fader on the left stay). The encoders turn the values. */
 #ifdef OS154
@@ -168,7 +157,7 @@ static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32
 #define WPROBES  64
 static const int8_t col_x[4] = {31, 57, 83, 109};   /* the encoders' columns (the knobs' centres) */
 
-static struct { int on, slot, play, strt, len, g, lfin, llen, lmod, lev; } shown;
+static struct { int on, slot, play, strt, len, g, lfin, lmod; } shown;
 extern int digicmi_voice_pos(int v, int *pos, uint32_t *len);   /* cmi_loop.c: a sounding CMI voice's playhead */
 static signed char lo[WCOLS], hi[WCOLS];
 static const short *peaks_pcm;
@@ -179,9 +168,9 @@ static int clampi(int x, int a, int b)
     return x < a ? a : x > b ? b : x;
 }
 
-static int32_t llen_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t flag)
+static int32_t lmod_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t flag)
 {
-    static const int8_t ks[] = {1, 3, 4, 5, 6, 7, EX_LMOD, EX_LFIN};
+    static const int8_t ks[] = {1, 3, 4, 5, 6, EX_LFIN};
     int32_t v[sizeof ks];
     unsigned i;
     (void)bmp; (void)x; (void)y; (void)flag;
@@ -193,10 +182,8 @@ static int32_t llen_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t
     shown.strt = clampi(v[2], 0, FULL);
     shown.len = clampi(v[3], 0, FULL);
     shown.g = clampi(v[4], 0, 0x7802);
-    shown.lev = (v[5] >> 8) & 127;
-    shown.lmod = (v[6] >> 8) & 127;
-    shown.lfin = (v[7] >> 8) & 127;
-    shown.llen = (value >> 8) & 127;
+    shown.lfin = (v[5] >> 8) & 127;
+    shown.lmod = (value >> 8) & 127;
     shown.on = 1;
     page2_age = 0;
     return 0;
@@ -293,24 +280,13 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
         return;
     shown.on = 0;
     fw_fillrect(bmp, PX0, 8, 127, 54, 0);        /* the page's knobs go; its bottom labels stay */
-    fw_fillrect(bmp, 100, 0, 127, 7, 0);         /* H's label: LEV becomes a slider, as the Digitakt II has */
 
     vbox(bmp, 0, shown.play < 5 ? plays[shown.play] : "?", 0);
-    if (shown.llen)
-        put_u(put_s(b, "L"), (unsigned)shown.llen);
-    else
-        put_s(b, "END");
-    vbox(bmp, 1, b, 0);
+    vbox(bmp, 1, "", 1);                         /* B: an empty place, as the Digitakt II draws one */
     vbox(bmp, 2, shown.lmod < 64 ? "HOLD" : "SUS", 0);
     put_u(put_s(b, "F"), (unsigned)shown.lfin);
     vbox(bmp, 3, b, !shown.lfin);
 
-    c = 103 + shown.lev * 20 / 127;              /* LEV: a horizontal slider in H's label place */
-    fw_fillrect(bmp, 103, 1, 123, 1, 1);
-    fw_fillrect(bmp, 103, 5, 123, 5, 1);
-    fw_fillrect(bmp, 102, 2, 102, 4, 1);
-    fw_fillrect(bmp, 124, 2, 124, 4, 1);
-    fw_fillrect(bmp, 103, 2, c, 4, 1);
 
     e = (const volatile uint32_t *)(SMP_TAB + 16 * (uint32_t)shown.slot);
     pcm = (const short *)e[0];
@@ -331,9 +307,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     }
     endv = clampi(shown.strt + shown.len, 0, FULL);
     loopv = clampi((shown.g ? clampi(shown.g - 1, 0, FULL) : shown.strt) + 2 * shown.lfin, 0, endv);
-    le = shown.llen ? loopv + shown.llen * (FULL / 128) : endv;
-    if (le > endv)
-        le = endv;
+    le = endv;                                   /* the loop runs to END */
     for (c = 0; c < 8; c++) {                    /* the playheads: an arrow under the wave for each note */
         int pos;
         uint32_t vl;
@@ -361,7 +335,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
 
 static const struct cm_src_page pages[2] = {
     {"CMI", {0, EX_8BIT, EX_ENG, 3, EX_SPRD, B, B, 7}, 0, {0, 0, 0}},
-    {"CMI LOOP", {1, EX_LLEN, EX_LMOD, EX_LFIN, 4, 5, 6, 7}, 0, {0, 0, 0}},   /* drawn by digicmi_wave_draw */
+    {"CMI LOOP", {1, B, EX_LMOD, EX_LFIN, 4, 5, 6, B}, 0, {0, 0, 0}},   /* drawn by digicmi_wave_draw */
 };
 
 const struct cm_ui32 digicmi_page = {
@@ -380,9 +354,9 @@ const struct cm_ui32 digicmi_page = {
                     .min = 0, .max = 0x7802, .def = 0, .fmt = fmt_pos },
         } },
     .extra = {
-        { .name = "LLEN", .lname = "Loop Length", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
-          .cc = 24, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_llen, .draw = llen_draw },
-        EXTRA("LMOD", "Loop Mode", 0, fmt_lmod, 25),
+        { .name = "-", .lname = "Unused", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT, .max = 0x7f00 },  /* 0.3-0.12's LLEN */
+        { .name = "LMOD", .lname = "Loop Mode", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
+          .cc = 25, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_lmod, .draw = lmod_draw },
         EXTRA("SPRD", "Stereo Spread", 0, fmt_sprd, 26),     /* slot 48 (0.3-0.6's DIR): cmi_loop.c */
         EXTRA("LFIN", "Loop Start Fine", 0, fmt_num, 27),
         { .name = "8BIT", .lname = "8-Bit Sample", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,

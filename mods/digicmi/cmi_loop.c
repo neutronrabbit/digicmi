@@ -9,7 +9,7 @@
  * A later stage reads PLAY again for its loop flag alone and ends a voice that does not loop at its end.
  *
  * For a CMI voice whose PLAY is FWD.L, this replaces the window and the PLAY those places read:
- *   LLEN  the loop's end: LOOP + LLEN/128 of the sample (0: the sample's END, as stock)
+ *   (LLEN, 0.3-0.12: gone in 0.13; the loop ends at the sample's END, STRT + LEN, as stock)
  *   LFIN  the loop's start moves on by LFIN/128 of one LOOP step
  *   LMOD  HOLD loops for as long as the voice sounds; SUS loops while the note is held, then plays on to
  *         END and stops (held: the AMP envelope's phase is not 0; it turns 0 at a live note's note-off and
@@ -75,7 +75,7 @@ int digicmi_play(int v, int play, int *win)
     int endv = clamp(PARAM(v, 21) + PARAM(v, 22), 0, FULL);
     int g = PARAM(v, 23);
     int loopv = g ? clamp(g - 1, 0, FULL) : strt;
-    int llen = (PARAM(v, 46) >> 8) & 127, sus = ((PARAM(v, 47) >> 8) & 127) >= 64;
+    int llen = 0, sus = ((PARAM(v, 47) >> 8) & 127) >= 64;     /* 0.13: no LLEN; the loop ends at END */
     int alt = play == P_PP, rev = play == P_REVL, lfin = (PARAM(v, 49) >> 8) & 127;
     loopv = clamp(loopv + 2 * lfin, 0, endv);                /* one LOOP step is 256: LFIN's step is 2 */
 
