@@ -40,6 +40,9 @@
 #define F_400d575e 0x400d5986
 #define F_400ee036 0x400ee25e
 #define F_400ee0a0 0x400ee2c8
+#define F_400edfe6 0x400ee20e   /* digicmi: a lock list, emptied (digislicer's OS_LOCKLIST) */
+#define F_400ee008 0x400ee230   /* digicmi: release a lock list (ref count) */
+#define F_421f6ee4 0x421f7ee4   /* digicmi: the lock lists' free list */
 #define F_40200b0c 0x40200ebc
 #define F_4020c29c 0x4020c64c
 #define F_409bac18 0x409bbc18
@@ -58,6 +61,9 @@
 #define F_400d575e 0x400d575e
 #define F_400ee036 0x400ee036
 #define F_400ee0a0 0x400ee0a0
+#define F_400edfe6 0x400edfe6
+#define F_400ee008 0x400ee008
+#define F_421f6ee4 0x421f6ee4
 #define F_40200b0c 0x40200b0c
 #define F_4020c29c 0x4020c29c
 #define F_409bac18 0x409bac18
@@ -179,6 +185,69 @@ static int holder(int p, int note)          /* the voice holding POLY track p's 
     return -1;
 }
 
+/* ---- digicmi: SPREAD (page 1, extra 10 = sound slot 48) ----
+ * Each note a CMI track starts takes the other side from the last: a PAN (slot 45, 0-127, centre 64) p-lock
+ * moved from the note's pan (its step's PAN lock, or the track's) towards hard left or right by SPREAD/127
+ * (0: unchanged; 127: fully left / fully right), in the note's p-lock list, which the render puts into its voice as a
+ * step's (0.1 measured: lists at +68, +0 ref count, +8 count, entries from +0x14 {u16 slot, s16 value} 8 bytes
+ * apart, 106 at most; ref counted only for type 0 messages, which the message free releases). A chord's notes
+ * share one list (MSG_COPY), so each copy of type 0 gets a list of its own. */
+#define LOCK_ALLOC()   ((char *)((u32 (*)(void))F_400edfe6)())
+#define LOCK_RELEASE   ((void (*)(char *))F_400ee008)
+#define LOCK_FREE_HEAD (*(volatile u32 *)F_421f6ee4)
+#define LOCK_MAX       106
+#define SLOT_PAN       45
+#define SLOT_SPRD      48
+static unsigned spread_side;
+
+static int sound_word(const unsigned char *snd, int slot)
+{
+    return *(const short *)(snd + 0x14 + 2 * slot);
+}
+
+/* A list of m's own: m's entries copied (its old reference let go), or a new empty one. 0 if there is none. */
+static char *own_list(char *m)
+{
+    char *old = (char *)M(m, M_LOCKS), *l;
+    int i, n;
+    if (M(m, M_TYPE) != 0)
+        return old;                         /* not ref counted: edit what it has (shared, or none) */
+    if (!LOCK_FREE_HEAD || !(l = LOCK_ALLOC()))
+        return old;
+    n = old ? M(old, 8) : 0;
+    for (i = 0; i < n && i < LOCK_MAX; i++)
+        *(u32 *)(l + 0x14 + 8 * i) = *(u32 *)(old + 0x14 + 8 * i);
+    M(l, 8) = i;
+    if (old)
+        LOCK_RELEASE(old);
+    M(m, M_LOCKS) = (int)l;
+    return l;
+}
+
+static void cmi_spread(char *m, const unsigned char *snd)
+{
+    int s = (sound_word(snd, SLOT_SPRD) >> 8) & 127, pan, i, n;
+    char *l;
+    if (!s)
+        return;
+    if (!(l = own_list(m)))
+        return;
+    n = M(l, 8);
+    for (i = 0; i < n && i < LOCK_MAX; i++)
+        if (*(unsigned short *)(l + 0x14 + 8 * i) == SLOT_PAN)
+            break;
+    if (i >= LOCK_MAX)
+        return;
+    pan = i < n ? *(short *)(l + 0x16 + 8 * i) : sound_word(snd, SLOT_PAN);   /* the step's PAN lock, or the track's */
+    pan = pan < 0 ? 0 : pan > 0x7f00 ? 0x7f00 : pan;
+    /* from that pan towards hard left (0) or hard right (127) by SPREAD/127: 127 is always fully left/right */
+    pan += (((spread_side++ & 1) ? 0x7f00 : 0) - pan) * s / 127;             /* left first */
+    *(unsigned short *)(l + 0x14 + 8 * i) = SLOT_PAN;
+    *(short *)(l + 0x16 + 8 * i) = (short)pan;
+    if (i == n)
+        M(l, 8) = n + 1;
+}
+
 void digipoly_route_c(char *m, u32 busy, const char *fp)
 {
     int v = M(m, M_VOICE), id = M(m, M_ID), i, w, n, remapped = 0;
@@ -213,6 +282,8 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
         if (!trig_on(m))
             return;
         started[v] = ++clock;
+        if (kit && kit[0x9e + v * 0xa2] == POLY && ((tag >> 24) & 0xff) != TAG_COPY)
+            cmi_spread(m, kit + 0x20 + v * 0xa2);   /* digicmi: the trig's own note */
         if ((tag >> 24) != TAG || !is_poly(kit, v) || muted(v, fp))
             return;
         used = (1u << v) | busy;
@@ -238,6 +309,7 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
             M(c, M_FLAGS) |= 0x10000;       /* the pitch is the message's note */
             M(c, M_NEXT) = M(m, M_NEXT);
             M(m, M_NEXT) = (int)c;
+            cmi_spread(c, kit + 0x20 + v * 0xa2);   /* digicmi: each chord note its own side */
             used |= 1u << w;
         }
         return;
@@ -265,6 +337,8 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
         held_by[w] = v;
         dt8poly_vstate[w] = n;
         started[w] = ++clock;
+        if (kit[0x9e + v * 0xa2] == POLY)
+            cmi_spread(m, kit + 0x20 + v * 0xa2);   /* digicmi: a live note */
     } else {
         w = holder(v, n);
         if (w >= 0) {

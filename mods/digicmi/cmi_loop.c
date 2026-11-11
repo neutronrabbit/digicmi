@@ -197,3 +197,13 @@ void digicmi_render(int32_t *blocks)
         }
     }
 }
+
+/* The page's playheads (cmi_page.c): voice v's position and its sample's length, if it is a sounding CMI voice. */
+int digicmi_voice_pos(int v, int *pos, u32 *len)
+{
+    if ((unsigned)v > 7 || !*(volatile unsigned char *)(V(v) + 0x28) || !is_cmi(v))
+        return 0;
+    *pos = POS(v);
+    *len = SLEN(v);
+    return 1;
+}

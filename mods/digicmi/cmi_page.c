@@ -23,6 +23,7 @@
 #define EX_LFIN 11
 #define EX_8BIT 12
 #define EX_ENG  13
+#define EX_SPRD 10
 #define P_BR    0x86                            /* BR's parameter id: the look of a plain 0..127 knob */
 #define B       CM_SRC_BLANK
 
@@ -65,6 +66,19 @@ static int32_t fmt_lmod(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
+/* Every pop-up text (ctx 1) must fit machine-pages' 16-byte buffer: 15 characters at most. A longer one
+ * overwrites its memory (0.8-0.10's "SPECTRAL (NOT BUILT)", 20, froze the unit when ENG was turned on). */
+static int32_t fmt_sprd(char *buf, int32_t v, int32_t ctx, int32_t m)
+{
+    (void)m;
+    v = (v >> 8) & 127;
+    if (!v)
+        put_s(buf, ctx ? "OFF (CENTRED)" : "OFF");
+    else
+        put_u(buf, (unsigned)v);
+    return 1;
+}
+
 static int32_t fmt_num(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
     (void)ctx; (void)m;
@@ -82,7 +96,7 @@ static int32_t fmt_8bit(char *buf, int32_t v, int32_t ctx, int32_t m)
 static int32_t fmt_eng(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
     (void)m;
-    put_s(buf, ((v >> 8) & 127) < 96 ? (ctx ? "SAMPLE" : "SMPL") : (ctx ? "SPECTRAL (NOT BUILT)" : "SPEC"));
+    put_s(buf, ((v >> 8) & 127) < 96 ? (ctx ? "SAMPLE" : "SMPL") : (ctx ? "SPECTRAL" : "SPEC"));   /* <= 15: pop[16] */
     return 1;
 }
 
@@ -110,6 +124,8 @@ static int32_t fmt_play(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
+static int page2_age = 1000;                    /* UI ticks since page 2 was last drawn (1000: not on show) */
+
 /* ---- the switches ----------------------------------------------------------------------------- */
 #define SW_OFF   0                               /* poly.c's digipoly_setparam snaps a turn to 0 or 127 */
 #define SW_ON    0x7f00
@@ -119,6 +135,7 @@ static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32
 {
     int on = ((value >> 8) & 127) >= 96, x0 = x + 2, x1 = x + 16, y0 = y + 5, y1 = y + 11;
     (void)flag;
+    page2_age = 1000;                                           /* page 1 is on show, not page 2 */
     fw_fillrect(bmp, x0 + 1, y0, x1 - 1, y0, 1);                /* a rounded outline */
     fw_fillrect(bmp, x0 + 1, y1, x1 - 1, y1, 1);
     fw_fillrect(bmp, x0, y0 + 1, x0, y1 - 1, 1);
@@ -152,6 +169,7 @@ static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32
 static const int8_t col_x[4] = {31, 57, 83, 109};   /* the encoders' columns (the knobs' centres) */
 
 static struct { int on, slot, play, strt, len, g, lfin, llen, lmod, lev; } shown;
+extern int digicmi_voice_pos(int v, int *pos, uint32_t *len);   /* cmi_loop.c: a sounding CMI voice's playhead */
 static signed char lo[WCOLS], hi[WCOLS];
 static const short *peaks_pcm;
 static uint32_t peaks_len;
@@ -180,6 +198,7 @@ static int32_t llen_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t
     shown.lfin = (v[7] >> 8) & 127;
     shown.llen = (value >> 8) & 127;
     shown.on = 1;
+    page2_age = 0;
     return 0;
 }
 
@@ -245,6 +264,22 @@ static void vbox(void *bmp, int k, const char *s, int dotted_frame)
     fw_textf(bmp, fw_font5, cx - 2 * n + 1, BOX_Y0 + 2, -1, "%s", s);
 }
 
+/* UI tick: while page 2 is what the SRC page last drew and a CMI note sounds (or just stopped), ask for
+ * a frame each tick so the playheads move. */
+void digicmi_page_tick(void *ctrl)
+{
+    static int was;
+    int v, pos, any = 0;
+    uint32_t vl;
+    if (page2_age < 1000)
+        page2_age++;
+    for (v = 0; v < 8; v++)
+        any |= digicmi_voice_pos(v, &pos, &vl);
+    if (page2_age < 1000 && (any || was) && ctrl)
+        *((unsigned char *)ctrl + 0x20) = 1;
+    was = any;
+}
+
 void digicmi_wave_draw(void *bmp, void *ctrl)
 {
     static const char *const plays[5] = {"REV", "REV.L", "FWD.L", "FWD", "P"};
@@ -299,6 +334,16 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     le = shown.llen ? loopv + shown.llen * (FULL / 128) : endv;
     if (le > endv)
         le = endv;
+    for (c = 0; c < 8; c++) {                    /* the playheads: an arrow under the wave for each note */
+        int pos;
+        uint32_t vl;
+        if (digicmi_voice_pos(c, &pos, &vl) && vl > 256 && pos >= 0 && (uint32_t)pos < vl) {
+            int x = WX0 + (int)(((uint32_t)pos >> 8) * (WCOLS - 1) / (vl >> 8));
+            fw_fillrect(bmp, x, 10, x, 10, 1);
+            fw_fillrect(bmp, clampi(x - 1, PX0, 127), 9, clampi(x + 1, PX0, 127), 9, 1);
+            fw_fillrect(bmp, clampi(x - 2, PX0, 127), 8, clampi(x + 2, PX0, 127), 8, 1);
+        }
+    }
     looped = shown.play == 1 || shown.play == 2 || shown.play == 4;
     dotted(bmp, col_of(shown.strt));             /* STRT and END */
     dotted(bmp, col_of(endv));
@@ -315,7 +360,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     .cc = c, .min = 0, .max = 127 << 8, .def = (d) << 8, .fmt = f }
 
 static const struct cm_src_page pages[2] = {
-    {"CMI", {0, EX_8BIT, EX_ENG, 3, B, B, B, 7}, 0, {0, 0, 0}},
+    {"CMI", {0, EX_8BIT, EX_ENG, 3, EX_SPRD, B, B, 7}, 0, {0, 0, 0}},
     {"CMI LOOP", {1, EX_LLEN, EX_LMOD, EX_LFIN, 4, 5, 6, 7}, 0, {0, 0, 0}},   /* drawn by digicmi_wave_draw */
 };
 
@@ -338,7 +383,7 @@ const struct cm_ui32 digicmi_page = {
         { .name = "LLEN", .lname = "Loop Length", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 24, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_llen, .draw = llen_draw },
         EXTRA("LMOD", "Loop Mode", 0, fmt_lmod, 25),
-        { .name = "-", .lname = "Unused", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT, .max = 0x7f00 },  /* 0.6's DIR */
+        EXTRA("SPRD", "Stereo Spread", 0, fmt_sprd, 26),     /* slot 48 (0.3-0.6's DIR): cmi_loop.c */
         EXTRA("LFIN", "Loop Start Fine", 0, fmt_num, 27),
         { .name = "8BIT", .lname = "8-Bit Sample", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 28, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_8bit, .draw = switch_draw },
