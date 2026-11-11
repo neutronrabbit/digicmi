@@ -13,8 +13,8 @@
  *   LFIN  fine loop start: one LOOP step divided into 128
  *   8BIT  a switch: the sample played at 8 bits (cmi_loop.c, digicmi_render)
  *   ENG   a switch: SMPL, or SPEC (the spectral synth, not built yet: its voices are silent)
- * The two switches keep their stored value just under 64 (off) or at 64 (on), so one notch flips them
- * (digicmi_switch_tick; machine-pages wants every extra 0-127). Extra 10 (slot 48, once DIR) and 14 (slot
+ * The two switches are 0 (off) or 127 (on): a turn either way flips them at once (poly.c, digipoly_setparam,
+ * snaps the value the knob sends; machine-pages wants every extra 0-127). Extra 10 (slot 48, once DIR) and 14 (slot
  * 52, Digi Poly kitstore's marker) are on no page; BR is on no page (stock BR crushes rate and bits). */
 #include "digitakt-mk1/core3.h"
 
@@ -111,8 +111,8 @@ static int32_t fmt_play(char *buf, int32_t v, int32_t ctx, int32_t m)
 }
 
 /* ---- the switches ----------------------------------------------------------------------------- */
-#define SW_OFF   0x3fff                          /* just under 64: a notch (about +0.5) turns it on */
-#define SW_ON    0x4000                          /* 64: a notch down turns it off */
+#define SW_OFF   0                               /* poly.c's digipoly_setparam snaps a turn to 0 or 127 */
+#define SW_ON    0x7f00
 
 /* A toggle drawn in the knob's 17 x 17 place (x + 1 .. x + 17, y .. y + 16; y = 0 is the bottom row). */
 static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t flag)
@@ -129,28 +129,6 @@ static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32
     } else                                                      /* off: the knob to the left */
         fw_fillrect(bmp, x0 + 2, y0 + 2, x0 + 5, y1 - 2, 1);
     return 1;
-}
-
-/* UI tick (poly.c): park each CMI sound's switches at 63 or 64. A p-lock or an LFO keeps its own value. */
-void digicmi_switch_tick(void)
-{
-    uint8_t *kit = fw_kit;
-    int t, k;
-    if (!kit)
-        return;
-    for (t = 0; t < 8; t++) {
-        uint8_t *snd = FW_SOUND(kit, t);
-        if (snd[FW_SOUND_MACHINE] != 40)
-            continue;
-        for (k = 50; k <= 51; k++) {                            /* 8BIT, ENG */
-            int16_t *w = (int16_t *)(snd + 0x14 + 2 * k);
-            int16_t want = *w >= SW_ON ? SW_ON : SW_OFF;
-            if (*w != want) {
-                *w = want;
-                fw_set_param(want, t, k);
-            }
-        }
-    }
 }
 
 /* ---- page 2: the Digitakt II-style waveform page ------------------------------------------------ *

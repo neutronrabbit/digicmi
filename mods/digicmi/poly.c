@@ -113,8 +113,7 @@ static struct kstore store;
  * (the kits are all in RAM and saved with the project; bit 7 was Digi Poly's per-track pool). */
 #define POLY8_N 45
 static unsigned char poolmask(int n) { return n == POLY8_N ? 0x01 : 0; }
-unsigned char digicmi_poly8;
-void digicmi_switch_tick(void);                /* the mode, as of the last UI tick */
+unsigned char digicmi_poly8;                /* the mode, as of the last UI tick */
 #ifdef OS154
 #define FUNC_HELD (*(volatile int *)0x4217bbb4)   /* the panel's FUNC key, kept by its key scan (0x400d3cce) */
 #else
@@ -128,7 +127,7 @@ static u32 started[8], clock;             /* voice -> clock at its last note sta
 
 static int is_poly(const unsigned char *kit, int t)
 {
-    return digicmi_poly8 && kit && t == 0;   /* digicmi: track 1 is the instrument; its machine is forced */
+    return digicmi_poly8 && kit && t == 0;   /* digicmi: track 1 is the instrument, whatever its machine */
 }
 
 static int muted(int v, const char *fp)
@@ -303,6 +302,15 @@ void digipoly_setparam(int value, int voice, int slot)
     if (voice == 16) {
         PARAMS[432 + slot] = value;
         return;
+    }
+    if ((slot == 50 || slot == 51) && (unsigned)voice < 8 && kit && kit[0x9e + voice * 0xa2] == POLY) {
+        /* digicmi: CMI's 8BIT and ENG are switches: a turn up is on (127), down off (0), at once */
+        int prev = PARAMS[53 * voice + 8 + slot];
+        unsigned char *ui = UI_KIT;
+        value = value > prev ? 0x7f00 : value < prev ? 0 : prev;
+        *(volatile short *)((char *)kit + 0x20 + voice * 0xa2 + 0x14 + 2 * slot) = (short)value;
+        if (ui)
+            *(volatile short *)(ui + 0x20 + voice * 0xa2 + 0x14 + 2 * slot) = (short)value;
     }
     PARAMS[53 * voice + 8 + slot] = value;
     own = (u32)(kit + 0x20 + voice * 0xa2);
@@ -547,11 +555,6 @@ void digipoly_rectick(void *ctrl)
     (void)ctrl;
     kstore_tick(&store, UI_KIT, KS_SLOT_POLY, poolmask);   /* a sound loaded onto a track keeps the mode's bit */
     digicmi_poly8 = XB((unsigned char *)KS_KIT0, POLY8_N) & 1;
-    digicmi_switch_tick();                  /* cmi_page.c: 8BIT and ENG flip with one notch */
-    if (digicmi_poly8 && UI_KIT && UI_KIT[0x9e] != POLY) {     /* overriding the machine menu on track 1 */
-        UI_KIT[0x9e] = POLY;
-        ks_persist(UI_KIT, 0);
-    }
     for (t = 0; t < 8; t++)
         if (rec_age[t] > 0 && --rec_age[t] == 0)
             rec_n[t] = 0;
