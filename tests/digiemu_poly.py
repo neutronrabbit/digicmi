@@ -22,7 +22,7 @@ and level mirroring) in seconds. This one boots the firmware and checks what onl
      which is exactly the condition the record path runs under.
 Prints a report and PASS/FAIL.
 """
-import argparse, os, struct, sys, time, types, zlib
+import argparse, json, os, struct, sys, time, types, zlib
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--digiemu", required=True)
@@ -159,6 +159,12 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
     tap(20, 20, 150); at(250, "snap", "q0_src_page")
     tap(20, 20, 150); at(250, "snap", "q0_src_page2")
     PAGES_END = t + 2                           # DIGICMI_PAGES_ONLY: stop here, no playback or sound checks
+    if os.environ.get("DIGICMI_INSNPROF"):      # instructions inside the audio render, by owner: idle, then 4 notes held
+        at(0, "chord", (0x44, 0x47, 0x4b))
+        at(200, "prof", "idle")
+        at(400, "wait")
+        at(1, "press", 24); at(80, "prof", "4 notes held (FWD.L)"); at(400, "wait"); at(5, "release", 24)
+        PAGES_END = t + 2
     if os.environ.get("DIGICMI_REDRAWTEST"):    # frames drawn: page 2 with a held note, then the TRIG page, note still held
         tap(20, 20, 150)
         at(1, "press", 24); at(60, "frames", "page 2, note held"); at(400, "frames", None)
@@ -525,6 +531,48 @@ def spin(m, pc, *args, **kw):
         elif k == "slots8bit":
             log.append("8BIT/ENG slots (50, 51) %s: %s" % (act[1], [hex(x & 0xffff) for x in
                        struct.unpack(">2h", uc.mem_read(kit + 0x20 + 0x14 + 2 * 50, 4))]))
+        elif k == "prof":
+            import bisect
+            from unicorn import UC_HOOK_CODE as _HC
+            if "prof_index" not in state:
+                owners = []
+                for mp in a.mods:
+                    d_ = json.load(open(mp)); mid = d_["id"]
+                    for nm in d_.get("symbols", {}):
+                        ad_ = MAP.get(nm)
+                        if isinstance(ad_, int) and 0x47000000 <= ad_ < 0x48000000:
+                            owners.append((ad_, mid, nm))
+                owners.sort()
+                state["prof_index"] = ([o[0] for o in owners], owners)
+            keys_, owners_ = state["prof_index"]
+            pr = {"label": act[1], "blocks": 0, "inside": False, "by": {}, "fn": {}}
+            state["prof_cur"] = pr
+            def in_(u, ad, s_, d):
+                pr["inside"] = True
+            def out_(u, ad, s_, d):
+                if pr["inside"]:
+                    pr["blocks"] += 1
+                pr["inside"] = False
+                if pr["blocks"] >= 100:
+                    for h in pr["hooks"]:
+                        u.hook_del(h)
+                    u.ctl_flush_tb()
+                    state.setdefault("prof", []).append(pr)
+            def ins_(u, ad, s_, d):
+                if not pr["inside"]:
+                    return
+                if ad < 0x47000000:
+                    o, fn_ = "firmware", "firmware"
+                else:
+                    i_ = bisect.bisect_right(keys_, ad) - 1
+                    o, fn_ = (owners_[i_][1], owners_[i_][2]) if i_ >= 0 else ("?", "?")
+                pr["by"][o] = pr["by"].get(o, 0) + 1
+                if o == "digicmi":
+                    pr["fn"][fn_] = pr["fn"].get(fn_, 0) + 1
+            pr["hooks"] = [uc.hook_add(UC_HOOK_CODE, in_, begin=0x40077428, end=0x40077428),
+                           uc.hook_add(UC_HOOK_CODE, out_, begin=0x400784c8, end=0x400784c8),
+                           uc.hook_add(UC_HOOK_CODE, ins_, begin=0, end=0xffffffff)]
+            uc.ctl_flush_tb()                    # hooks added mid-run apply only to code translated afterwards
         elif k == "frames":
             state["fr_on"] = act[1]
             if act[1]:
@@ -653,6 +701,13 @@ def spin(m, pc, *args, **kw):
     if LOOPTEST == "live" and state["n"] == LIVE_STEP:   # a knob turned while the chord sounds
         for w in range(8):
             uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + 23), struct.pack(">h", LIVE_LOOP << 8))
+    if os.environ.get("DIGICMI_PITREGS") and state["n"] in (100, 3000):
+        for ch, base in enumerate((0xFC080000, 0xFC084000, 0xFC088000, 0xFC08C000)):
+            pcsr, pmr, pcntr = struct.unpack(">HHH", uc.mem_read(base, 6))
+            pre = 1 << (((pcsr >> 8) & 0xF) + 1)
+            per_s = pre * (pmr + 1) / 132e6
+            log.append("PIT%d step %d: PCSR 0x%04x PMR %d PCNTR %d prescaler %d -> period %.4f ms, tick %.3f us, %.1f ticks a 667 us block"
+                       % (ch, state["n"], pcsr, pmr, pcntr, pre, per_s * 1e3, pre / 132e6 * 1e6, 666.7e-6 / (pre / 132e6)))
     if "digicmi_cpu_load" in MAP:                 # the CPU meter: what it measured, and a fake value for screenshots
         cl_ = struct.unpack(">i", uc.mem_read(MAP["digicmi_cpu_load"], 4))[0]
         state.setdefault("cpu_seen", set()).add(cl_)
@@ -1045,6 +1100,15 @@ if "digicmi_steal" in MAP:
 
 if state.get("cpu_seen"):
     print("cpu meter values seen:", sorted(state["cpu_seen"])[:12])
+if state.get("prof_cur") and state["prof_cur"] not in state.get("prof", []):
+    pc_ = state["prof_cur"]; print("profile unfinished:", pc_["label"], "blocks", pc_["blocks"], "inside", pc_["inside"], "by", pc_["by"])
+for pr in state.get("prof", []):
+    tot = sum(pr["by"].values())
+    print("render profile, %s: %d blocks, %.0f instructions a block" % (pr["label"], pr["blocks"], tot / max(pr["blocks"], 1)))
+    for o_, n_ in sorted(pr["by"].items(), key=lambda x: -x[1]):
+        print("   %-14s %5.1f%%  %7.0f a block" % (o_, 100.0 * n_ / tot, n_ / max(pr["blocks"], 1)))
+    for f_, n_ in sorted(pr["fn"].items(), key=lambda x: -x[1])[:6]:
+        print("      digicmi %-22s %6.0f a block" % (f_, n_ / max(pr["blocks"], 1)))
 if state.get("frames"):
     for k, (n_, steps_) in state["frames"].items():
         print("frames %s: %d in %d steps" % (k, n_, steps_))

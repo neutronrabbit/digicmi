@@ -227,6 +227,12 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Drawn by `draw_meter` (cmi_page.c) in the title bar, x 90-103, rows 1-8 from the top (y 55-62): black box, "NN%" in its own 3x5 glyphs, white. That strip is free in both title-bar states (page title; pattern name + tempo box's empty left end). Page 1 is recognised by `switch_draw` running in the frame (`page1_drawn`), page 2 by `lmod_draw`; `cmi_live` = the last frame was one of them. The tick asks for a frame when the published value changes while a CMI page is up (<= 2/s).
 - Checked in digiemu: drawing on page 1 ("--%"), page 2 and the pattern-name bar (`DIGICMI_FAKELOAD=108` -> "42%"). Not checked: the readings on hardware (the user should compare 1 vs 8 voices, RETRO, TIME).
 
+## Render load: what the meter's 85% means (0.22, measured)
+
+- On the unit, right after boot, the meter read 85% (peak). PIT0's resolution is fine: PCSR 0x053f, PMR 41249, prescaler 64: 0.485 us a tick, ~1375 ticks a block (read from the emulated firmware's registers, `DIGICMI_PITREGS=1`).
+- `DIGICMI_INSNPROF=1` counts every instruction inside the render (0x40077428 -> 0x400784c8) per owner, by nearest MAP symbol (hooks added mid-run need `uc.ctl_flush_tb()`). 100 blocks: idle 85,113 instructions a block (firmware 98.2%, digicmi 1.3% = 1,141, machine-pages 0.4%, core ~0); 4 looping notes 84,913 (firmware 97.6%, digicmi 2.0% = 1,695: digicmi_play 832, digicmi_render 275, digipoly_levels 204). The stock render does the same work with or without notes (all tracks, filters, effects every block), so a high, flat load is the firmware's; Digi CMI adds ~1-2% of it.
+- At ~85k instructions a block and ~250 MHz, 85% of a 667 us block is ~1.6-1.7 cycles an instruction: plausible. So the UI gets what is left; Digi CMI cannot lower the stock part.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.
