@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.27 (2026-11-12): faded voices: no dead stops
+
+0.26 ended a released voice as it passed -72 dB and left its "end reached" flag set, so on the unit released notes stopped dead, and a later note on a reused voice was cut when it stopped looping. A voice is now switched off only after its envelope has rested at its floor (about -108 dB) for 64 blocks, and the flag is cleared when the next note starts. Known issue: not yet confirmed on the unit.
+
 ## 0.26 (2026-11-12): faded voices switch off
 
 On the unit, 0.25 left released notes running silently on every voice (the AMP envelope never quite reaches zero), and the audio load rose from 86% to 94% after playing, with the UI lagging everywhere. A released note that has faded below -72 dB is now ended and its voice switched off, as after boot. Known issue: the load effect is the real chip's and is not measurable in the emulator; check the meter after playing.

@@ -262,6 +262,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Fix (cmi_loop.c): a released CMI voice below -72 dB gets `fade_end`; `digicmi_stage` then reports it non-looping with end reached (the gain stage quarters its gain each block); once V+0x10 (gain) is 0, `digicmi_render` clears V+0x28 (voice on), its state after boot. Only setting the end flag (first attempt) silences but leaves the voice on. Measured: six released voices all off within 450 steps; overlap, SUS and HOLD tests still pass.
 - Unverified on hardware: whether the meter returns to ~86% after playing, and the lag.
 
+## Dead stops after 0.26 (0.27)
+
+- Reported on the unit with 0.26: long release, key held a while then released: the sound stops dead, with SUS and with HOLD. Not reproduced in digiemu with the default envelope (HOLD fades: -18 -> -45 dB in 80 steps).
+- Found by reading: 0.26's `digicmi_stage` sets V+0x29 (end reached) for a faded voice and nothing cleared it; `fade_end` itself was cleared only in render, after the next note's first stage call. A later note on that voice was ended once it stopped looping (SUS release). 0.27: at a note's start the stage clears `fade_end`, `fade_count` and, if we set it, V+0x29 (`fade_flagged`).
+- 0.27's rule: switch off only after phase 0 and |level| < 0x2000 (~-108 dB) for 64 blocks running (the floor is ~-135 dB). Measured: six released voices off within 600 steps; overlap, sus (LEN 90 and 120), hold pass.
+- **The AMP envelope is not in kit slots 38-40**: setting slots 25-35 to 127 changes it (phase 3 appears, slow attack, holds at -9 dB); 36-43 and 1-16 don't. Which of 25-35 is attack/hold/decay: being narrowed (`DIGICMI_SETSLOT`, `DIGICMI_LONGHOLD`). The "AMP kit slots" list under 0.25 above is wrong except pan 44 / volume 45.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

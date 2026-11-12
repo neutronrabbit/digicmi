@@ -96,9 +96,14 @@ static void zc_snap(int v, int *ls, int *le)
  * UI lagged everywhere; the emulator shows only +1% instructions, so the cost is the real chip's (likely the
  * streaming samples crowding the cache). Two steps: the gain stage first sees "not looping, end reached" and
  * fades the gain to 0 (its own end-of-sample path, digicmi_stage); once the gain is 0 the voice is switched off
- * (V + 0x28 = 0, its state after boot) in digicmi_render. A new note on the voice starts it again as usual. */
-#define FADE_END   0x80000                                   /* Q31 magnitude: -72 dB */
-static unsigned char fade_end[8];
+ * (V + 0x28 = 0, its state after boot) in digicmi_render. A new note on the voice starts it again as usual.
+ * 0.27: only once the envelope has rested at its floor (below FADE_END, about -108 dB) for FADE_BLOCKS blocks
+ * running, so nothing audible is ever cut (0.26 ended a voice as it passed -72 dB; on the unit released notes
+ * stopped dead). And the "end reached" flag this sets is cleared when the voice's next note starts: 0.26 left it
+ * set, so a later note on a reused voice was ended the moment it stopped looping (SUS on release). */
+#define FADE_END    0x2000                                   /* Q31 magnitude: about -108 dB */
+#define FADE_BLOCKS 64
+static unsigned char fade_end[8], fade_count[8], fade_flagged[8];
 
 static signed char dir[8];
 static unsigned char released[8], have[8], eff[8];
@@ -229,8 +234,17 @@ int digicmi_play(int v, int play, int *win)
 /* The later stage's PLAY word (its loop flag), for voice v: ours for a CMI voice, else the stock word. */
 int digicmi_stage(int v, int word)
 {
+    if ((unsigned)v < 8 && ((fw_voice_start >> v) & 1)) {    /* a new note: not faded, and no stale end flag */
+        fade_end[v] = 0;
+        fade_count[v] = 0;
+        if (fade_flagged[v]) {
+            *(volatile unsigned char *)(V(v) + 0x29) = 0;
+            fade_flagged[v] = 0;
+        }
+    }
     if ((unsigned)v < 8 && fade_end[v]) {                    /* faded out: end it, as at a sample's end */
         *(volatile unsigned char *)(V(v) + 0x29) = 1;
+        fade_flagged[v] = 1;
         return (word & 0xff) | (P_FWD << 8);
     }
     if ((unsigned)v > 7 || !eff[v])
@@ -301,14 +315,18 @@ void digicmi_render(int32_t *blocks)
     for (v = 0; v < 8; v++) {
         int32_t *b = blocks + 32 * v;
         int lvl_ = fw_amp_env[3 * v + 1];
-        if ((fw_voice_start >> v) & 1)
+        if ((fw_voice_start >> v) & 1) {
             fade_end[v] = 0;                                 /* a new note */
-        else if (fade_end[v]) {
+            fade_count[v] = 0;
+        } else if (fade_end[v]) {
             if (GAIN(v) == 0)                                /* faded to nothing: the voice off, as after boot */
                 *(volatile unsigned char *)(V(v) + 0x28) = 0;
         } else if (is_cmi(v) && *(volatile unsigned char *)(V(v) + 0x28) && fw_amp_env[3 * v] == 0
-                   && lvl_ > -FADE_END && lvl_ < FADE_END)
-            fade_end[v] = 1;                                 /* released and below -72 dB: end it */
+                   && lvl_ > -FADE_END && lvl_ < FADE_END) {
+            if (++fade_count[v] >= FADE_BLOCKS)
+                fade_end[v] = 1;                             /* released, at the floor for a while: end it */
+        } else
+            fade_count[v] = 0;
         if (!is_cmi(v)) {
             hold_last[v] = POS(v);
             continue;

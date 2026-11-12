@@ -183,6 +183,15 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
         at(1, "phase", "slur"); at(1, "press", 24); at(60, "press", 25); at(60, "release", 25); at(5, "release", 24)
         at(200, "press", 26); at(60, "release", 26); at(200, "wait"); at(0, "phase", None)
         PAGES_END = t + 2
+    if os.environ.get("DIGICMI_LONGHOLD"):      # one note held a long time, then released: its voice and envelope
+        at(0, "chord", (0x40, 0x40, 0x40))
+        at(1, "press", 24)
+        for k_ in range(6):
+            at(200, "voices", "held %d steps" % (200 * (k_ + 1)))
+        at(1, "release", 24)
+        for d_ in (2, 5, 10, 20, 40, 80, 160, 320):
+            at(d_, "voices", "released, +%d" % d_)
+        PAGES_END = t + 2
     if os.environ.get("DIGICMI_PILEUP"):        # six notes played and released, then nothing: which voices stay on
         at(0, "chord", (0x40, 0x40, 0x40))
         for k_ in range(6):
@@ -191,6 +200,12 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
             at(150, "voices", "after %d steps idle" % (150 * (k_ + 1)))
         if os.environ.get("DIGICMI_INSNPROF"):
             at(10, "prof", "6 released notes piled up"); at(400, "wait")
+        if os.environ.get("DIGICMI_AFTERPILE"):  # then one more note, held and released: does its tail play?
+            at(1, "press", 24)
+            at(100, "voices", "new note held 100 steps")
+            at(1, "release", 24)
+            for d_ in (2, 5, 10, 20, 40, 80, 160):
+                at(d_, "voices", "new note released, +%d" % d_)
         PAGES_END = t + 2
     if os.environ.get("DIGICMI_OVERLAP"):       # note 1 played and released, note 2 while note 1's long decay rings
         at(0, "chord", (0x40, 0x40, 0x40))
@@ -614,7 +629,8 @@ def spin(m, pc, *args, **kw):
                 vs_ = 0x8000EDC4 + 94 * v_
                 env_ = struct.unpack(">ii", uc.mem_read(AMP + 12 * v_, 8))
                 if uc.mem_read(vs_ + 0x28, 1)[0]:
-                    on_.append("v%d ph%d %.0fdB" % (v_, env_[0], 20 * __import__("math").log10(max(abs(env_[1]), 1) / 2 ** 31)))
+                    on_.append("v%d ph%d %.0fdB end%d gain%d" % (v_, env_[0], 20 * __import__("math").log10(max(abs(env_[1]), 1) / 2 ** 31),
+                               uc.mem_read(vs_ + 0x29, 1)[0], struct.unpack(">i", uc.mem_read(vs_ + 0x10, 4))[0]))
             log.append("voices on, %s: %d  %s" % (act[1], len(on_), " ".join(on_)))
             if "fade_end" in MAP:
                 log.append("   fade_end %s, end-reached bytes %s, stage calls %s" % (list(uc.mem_read(MAP["fade_end"], 8)),
@@ -676,6 +692,16 @@ def spin(m, pc, *args, **kw):
                         uc.mem_write(k_ + 0x20 + 0x14 + 2 * 52, struct.pack(">h", sv_))
                     for w in range(8):
                         uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + 52), struct.pack(">h", sv_))
+                for kv_ in [x for x in os.environ.get("DIGICMI_SETSLOT", "").split(",") if x]:   # "slot:value,..."
+                    sl_, vl_ = (int(y) for y in kv_.split(":"))
+                    for k_ in (kit, ek):
+                        uc.mem_write(k_ + 0x20 + 0x14 + 2 * sl_, struct.pack(">h", vl_ << 8))
+                    for w in range(8):
+                        uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + sl_), struct.pack(">h", vl_ << 8))
+                if os.environ.get("DIGICMI_AMPHOLD") is not None: # AMP hold (kit slot 39)
+                    hv_ = int(os.environ["DIGICMI_AMPHOLD"]) << 8
+                    for k_ in (kit, ek):
+                        uc.mem_write(k_ + 0x20 + 0x14 + 2 * 39, struct.pack(">h", hv_))
                 if os.environ.get("DIGICMI_AMPDEC") is not None:  # AMP decay (kit slot 40: the range table says 41)
                     dv_ = int(os.environ["DIGICMI_AMPDEC"]) << 8
                     for k_ in (kit, ek):
