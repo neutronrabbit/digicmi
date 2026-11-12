@@ -114,10 +114,8 @@ typedef unsigned int u32;
 
 #include "kitstore.h"
 #define POOLOUT(kit, t) XB(kit, 6 * (t) + 3)   /* bit 7: track t is kept out of the POLY pool */
-static struct kstore store;
 /* digicmi: CMI on track 1 is the 8-voice instrument (0.10; the SETTINGS row of 0.5-0.9 is gone). The kit
  * bytes 0.5-0.9 used (bit 0 of byte 45) are no longer read; kitstore keeps only its markers. */
-static unsigned char poolmask(int n) { (void)n; return 0; }
 unsigned char digicmi_poly8;                /* track 1 is CMI, as of the last UI tick (LEDs, tests) */
 #ifdef OS154
 #define FUNC_HELD (*(volatile int *)0x4217bbb4)   /* the panel's FUNC key, kept by its key scan (0x400d3cce) */
@@ -609,7 +607,8 @@ void digipoly_rectick(void *ctrl)
 {
     int t;
     (void)ctrl;
-    kstore_tick(&store, UI_KIT, KS_SLOT_POLY, poolmask);   /* a sound loaded onto a track keeps the mode's bit */
+    /* (0.3-0.19 ran kstore_tick here to keep Digi Poly's marker in slot 52; nothing has been stored there since
+     * the pool went in 0.10, and 0.20 gives slot 52 to the time synth's ROOT) */
     digicmi_poly8 = (unsigned char)is_poly(UI_KIT, 0);
     for (t = 0; t < 8; t++)
         if (rec_age[t] > 0 && --rec_age[t] == 0)

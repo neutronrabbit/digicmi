@@ -5,15 +5,19 @@
  * Tables: TS_FRAMES single cycles of TS_LEN samples (Q15, one extra sample for the wrap), cut from track 1's
  * sample at evenly spaced places between STRT and END (STRT + LEN). Each cycle is one period of the sample's
  * root: found by pitch detection (ROOT = AUTO; a YIN-style difference function over the middle of the region,
- * on the sample at half rate, then refined at full rate with a parabola) or set by ROOT (D, slot 49 = LFIN in
- * sample mode: 0 AUTO, else MIDI note 23 + value). A region with no clear period falls back to C3 (183.47
+ * on the sample at half rate, then refined at full rate with a parabola) or set by ROOT (page 1 F, slot 52:
+ * 0 AUTO, else MIDI note 23 + value; a value with a low byte, as kits from before 0.20 hold there, is AUTO). A region with no clear period falls back to C3 (183.47
  * samples). Each cycle starts at the first upward zero crossing after its place and is resampled to TS_LEN; a straight ramp takes out the difference between its
  * two ends so it loops without a click. All frames share one scale (the loudest frame's peak to 29000), so
  * quiet parts of the sample stay quieter. The tables are rebuilt in the UI tick when the sample, STRT or LEN
  * change, into the bank the render is not reading, then switched in one store.
  * Per voice (cmi_loop.c's digicmi_render calls ts_voice), from the voice's own smoothed values:
- *   A, slot 18 (PLAY 0-4) the order: 3 FWD once, 0 REV once, 2 FWD.L loop, 1 REV.L loop, 4 P ping-pong
- *   G, slot 23 (0-120)    TIME of a whole pass: 0.05 s x 2^(G/15), to about 13 s
+ *   A, slot 18 (PLAY 0-4) the order: 3 FWD once, 0 REV once, 2 FWD.L, 1 REV.L, 4 P, as the sample's loops:
+ *                         FWD.L plays from the first wave to the last, then loops from LOOP's wave to the last;
+ *                         REV.L from the last down to LOOP's, and round; P first to last, then between the
+ *                         last and LOOP's, back and forth
+ *   G, slot 23 (LOOP)     the loop's start: LOOP's place between STRT and END, as a wave (cmi_loop.c)
+ *   D, slot 49 (0-127)    TIME of a whole pass, first wave to last: 0.05 s x 2^(T/15), T = D x 120 / 127
  *   B, slot 46 (0-127)    BLND: 0 steps from wave to wave (the CMI's segments), 127 crossfades all the way;
  *                         curved (cube), as the ear only hears the joins while a crossfade is a few ms long
  * Per track (track 1's sound, in the tables):
@@ -286,7 +290,8 @@ void digicmi_ts_tick(void)
     strt = W(21);
     lenv = W(22);
     smear = (W(47) >> 8) & 127;
-    root = (W(49) >> 8) & 127;                      /* ROOT: 0 AUTO, else MIDI note 23 + value */
+    root = W(52) & 0xff ? 0 : (W(52) >> 8) & 127;   /* ROOT: 0 AUTO, else MIDI note 23 + value; a low byte (the
+                                                       marker older kits hold, 0x4b53) is AUTO */
     root = root ? (root + 23 > 108 ? 108 : root + 23) : 0;
 #undef W
     strt = strt < 0 ? 0 : strt > FULL ? FULL : strt;
@@ -333,7 +338,7 @@ int digicmi_ts_pos(int v)
 /* Render-task: voice v's block from the tables. play_pos is the stock player's playhead (its move per block is
  * the pitch), mode PLAY's 0-4, time G's 0-120, blend B's 0-127, gain the voice's (V + 0x10), start a note's
  * first block. */
-void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, int gain, int start)
+void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, int loop_frame, int gain, int start)
 {
     const short (*t)[TS_LEN + 1];
     int adv, i, f0, f1, ff, blocks, whole, scl, width;
@@ -366,23 +371,24 @@ void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, in
         blocks = 1;
     if (!start)
         fpos[v] += fdir[v] * (LAST_FRAME / blocks + 1);
+    loop_frame = loop_frame < 0 ? 0 : loop_frame > LAST_FRAME ? LAST_FRAME : loop_frame;
     if (fpos[v] > LAST_FRAME) {
-        if (mode == 2)                              /* FWD.L: round again */
-            fpos[v] = 0;
-        else if (mode == 4) {                       /* P: back */
+        if (mode == 2)                              /* FWD.L: round again, from LOOP's wave */
+            fpos[v] = loop_frame;
+        else if (mode == 4) {                       /* P: back, towards LOOP's wave */
             fpos[v] = LAST_FRAME;
             fdir[v] = -1;
         } else
             fpos[v] = LAST_FRAME;                   /* FWD: stay on the last wave */
-    } else if (fpos[v] < 0) {
-        if (mode == 1)                              /* REV.L */
+    } else if (fdir[v] < 0 && (mode == 1 || mode == 4) && fpos[v] < loop_frame) {
+        if (mode == 1)                              /* REV.L: down to LOOP's wave, and round from the last */
             fpos[v] = LAST_FRAME;
-        else if (mode == 4) {
-            fpos[v] = 0;
+        else {                                      /* P: forward again from LOOP's wave */
+            fpos[v] = loop_frame;
             fdir[v] = 1;
-        } else
-            fpos[v] = 0;
-    }
+        }
+    } else if (fpos[v] < 0)
+        fpos[v] = 0;                                /* REV: stay on the first wave */
     f0 = fpos[v] >> 16;
     f1 = f0 < TS_FRAMES - 1 ? f0 + 1 : f0;
     ff = (fpos[v] & 0xffff) >> 1;                   /* 15 bits */

@@ -10,7 +10,7 @@
  *
  * For a CMI voice whose PLAY is FWD.L, this replaces the window and the PLAY those places read:
  *   (LLEN, 0.3-0.12: gone in 0.13; the loop ends at the sample's END, STRT + LEN, as stock)
- *   LFIN  the loop's start moves on by LFIN/128 of one LOOP step
+ *   (LFIN, 0.3-0.19: gone in 0.20; slot 49 is the time synth's TIME)
  *   LMOD  HOLD loops for as long as the voice sounds; SUS loops while the note is held, then plays on to
  *         END and stops (held: the AMP envelope's phase is not 0; it turns 0 at a live note's note-off and
  *         at the end of a sequencer trig's length, both measured)
@@ -83,8 +83,8 @@ int digicmi_play(int v, int play, int *win)
     int g = PARAM(v, 23);
     int loopv = g ? clamp(g - 1, 0, FULL) : strt;
     int llen = 0, sus = ((PARAM(v, 47) >> 8) & 127) >= 64;     /* 0.13: no LLEN; the loop ends at END */
-    int alt = play == P_PP, rev = play == P_REVL, lfin = (PARAM(v, 49) >> 8) & 127;
-    loopv = clamp(loopv + 2 * lfin, 0, endv);                /* one LOOP step is 256: LFIN's step is 2 */
+    int alt = play == P_PP, rev = play == P_REVL;
+    loopv = clamp(loopv, 0, endv);
 
     int s0 = (int)scale((u32)strt, len), se = (int)scale((u32)endv, len);
     int ls = (int)scale((u32)loopv, len);
@@ -179,7 +179,17 @@ int digicmi_stage(int v, int word)
  * rounding the block down to a grid of gain x 0.81 / 2^7 (207/2^15 ~ 0.81/128, without 64-bit sums).
  * ENG = TIME replaces the block with the time synth's (timesynth.c); RETRO then acts on it as on a sample. */
 #define GAIN(v)  (*(volatile int *)(V(v) + 0x10))
-void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, int gain, int start);
+void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, int loop_frame, int gain, int start);
+
+/* The time synth's loop start: LOOP's place between STRT and END as a wave position, 16.16 of 0-15 (G 0: STRT) */
+static int ts_loop_frame(int v)
+{
+    int strt = clamp(PARAM(v, 21), 0, FULL), endv = clamp(PARAM(v, 21) + PARAM(v, 22), 0, FULL), g = PARAM(v, 23);
+    int loopv = clamp(g ? g - 1 : strt, strt, endv);
+    if (endv <= strt)
+        return 0;
+    return ((loopv - strt) * 15 * 256 / (endv - strt)) << 8;
+}
 
 /* RETRO's 24 kHz: a CMI Series I voice played its 24 kHz sample with a clock of 24 kHz x the note's pitch ratio
  * (it pitched by clock, not by resampling). Here each output value is held until the voice's playhead has moved
@@ -224,8 +234,8 @@ void digicmi_render(int32_t *blocks)
         if (((PARAM(v, 50) >> 8) & 127) < 96)
             hold_last[v] = POS(v);                           /* RETRO off: keep the playhead's place */
         if (((PARAM(v, 51) >> 8) & 127) >= 96)              /* ENG = TIME: the time synth (timesynth.c) */
-            ts_voice(v, b, POS(v), (PARAM(v, 18) >> 8) & 7, (PARAM(v, 23) >> 8) & 127, (PARAM(v, 46) >> 8) & 127,
-                     GAIN(v), (int)((fw_voice_start >> v) & 1));
+            ts_voice(v, b, POS(v), (PARAM(v, 18) >> 8) & 7, ((PARAM(v, 49) >> 8) & 127) * 120 / 127,
+                     (PARAM(v, 46) >> 8) & 127, ts_loop_frame(v), GAIN(v), (int)((fw_voice_start >> v) & 1));
         if (((PARAM(v, 50) >> 8) & 127) >= 96) {             /* RETRO: 24 kHz at the note's clock, 8 bits */
             int g = GAIN(v), step;
             retro_rate(v, b);

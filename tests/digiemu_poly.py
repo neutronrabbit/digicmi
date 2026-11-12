@@ -635,6 +635,9 @@ def spin(m, pc, *args, **kw):
     if LOOPTEST == "live" and state["n"] == LIVE_STEP:   # a knob turned while the chord sounds
         for w in range(8):
             uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + 23), struct.pack(">h", LIVE_LOOP << 8))
+    if state.get("lr_on") and "fpos" in MAP:     # the time synth's voice 0: its place among the waves (16.16)
+        fp_ = struct.unpack(">i", uc.mem_read(MAP["fpos"], 4))[0]
+        state.setdefault("fpos", {}).setdefault(state["lr_on"], []).append(fp_)
     if state.get("lr_on"):
         tb = struct.unpack(">256i", uc.mem_read(0x80001a18, 1024))
         state["lr"][state["lr_on"]].append(sum(abs(x) >> 8 for x in tb))
@@ -1017,6 +1020,12 @@ if "digicmi_steal" in MAP:
     if not st:
         fails.append("no steal ran, so the quietest-voice rule was not exercised")
 
+if state.get("fpos"):
+    for k, xs in state["fpos"].items():
+        xs = [x / 65536 for x in xs]
+        jumps = [(round(xs[i - 1], 2), round(xs[i], 2)) for i in range(1, len(xs)) if abs(xs[i] - xs[i - 1]) > 3]
+        turns = [round(xs[i], 2) for i in range(1, len(xs) - 1) if (xs[i] - xs[i - 1]) * (xs[i + 1] - xs[i]) < 0]
+        print("waves %s: range %.2f-%.2f, jumps %s, turns %s" % (k, min(xs), max(xs), jumps[:6], turns[:8]))
 if state.get("lr"):
     for wa_, pcs_ in state.get("rw", {}).items():
         print("reads of 0x%x: %s" % (wa_, " ".join("0x%x/%d" % x for x in sorted(pcs_))))

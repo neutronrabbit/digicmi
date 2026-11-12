@@ -1,6 +1,10 @@
 # Changelog
 
-Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.19 only in digiemu.
+Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.20 only in digiemu.
+
+## 0.20 (2026-11-12): TIME takes the sample's loop layout; LFIN removed; ROOT on page 1
+
+LFIN (fine loop start) is gone from both engines. In TIME, TIME moves to page 2 D and LOOP (G) sets where the wave loop starts, so PLAY and LOOP work as for the sample. ROOT moves to page 1 F, in the slot Digi Poly's unused kit marker held; older kits read it as AUTO.
 
 ## 0.19 (2026-11-12): time synth ROOT with pitch detection
 

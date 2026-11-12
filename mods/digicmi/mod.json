@@ -1,12 +1,12 @@
 {
  "id": "digicmi",
- "version": "0.19",
+ "version": "0.20",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "neutronrabbit (fork of Digi Poly 2.1 by gdeo607 / digi1_mods, MIT)",
  "device": "digitakt-mk1",
  "os": "1.53",
- "description": "Adds a CMI machine (FUNC+SRC list), machine 40: a Fairlight CMI-style instrument that plays one sample polyphonically from MIDI note 60 (C3). CMI can only be chosen on track 1, and there it makes track 1 one 8-voice instrument: tracks 2-8 become its voices (their machines can't be changed and their trigs are silent until track 1 is another machine); hold FUNC and the track keys turn blue. Page 1: TUNE, RETRO (8 bits at 24 kHz with the CMI Series I's pitch-following clock), ENG (SMPL or TIME), SAMP / SPRD (stereo spread: notes alternate left and right, full at 127), LEV. Page 2 (SRC again): a Digitakt II-style waveform page with each note's playhead. With SMPL: PLAY (REV, REV.L, FWD.L, FWD, P = ping-pong), LMOD (HOLD/SUS), LFIN / STRT, LEN, LOOP, LEV; loops run from LOOP to END, follow knobs, locks and LFOs, and loop faster on higher notes. With TIME: 16 single cycles cut from the sample between STRT and END play in turn: PLAY sets the order, BLND steps or crossfades, SMEAR mixes neighbouring waves, ROOT is AUTO (pitch detection) or a note, TIME the pass's length. Velocity sets volume; stealing takes the quietest voice. Conflicts with Digi Poly, dt8poly, DIGISLICER, Digi EQ and Digi Matrix.",
+ "description": "Adds a CMI machine (FUNC+SRC list), machine 40: a Fairlight CMI-style instrument that plays one sample polyphonically from MIDI note 60 (C3). CMI can only be chosen on track 1, and there it makes track 1 one 8-voice instrument: tracks 2-8 become its voices (their machines can't be changed and their trigs are silent until track 1 is another machine); hold FUNC and the track keys turn blue. Page 1: TUNE, RETRO (8 bits at 24 kHz with the CMI Series I's pitch-following clock), ENG (SMPL or TIME), SAMP / SPRD (stereo spread: notes alternate left and right, full at 127), ROOT (the time synth's: AUTO pitch detection or a note), LEV. Page 2 (SRC again): a Digitakt II-style waveform page with each note's playhead. With SMPL: PLAY (REV, REV.L, FWD.L, FWD, P = ping-pong), LMOD (HOLD/SUS) / STRT, LEN, LOOP, LEV; loops run from LOOP to END, follow knobs, locks and LFOs, and loop faster on higher notes. With TIME: 16 single cycles cut from the sample between STRT and END play in turn, with the same loop layout: PLAY sets the order and looping, LOOP the wave the loop returns to, TIME the pass's length, BLND steps or crossfades, SMEAR mixes neighbouring waves. Velocity sets volume; stealing takes the quietest voice. Conflicts with Digi Poly, dt8poly, DIGISLICER, Digi EQ and Digi Matrix.",
  "sources": [
   "poly_ui.s",
   "poly_glue.s",

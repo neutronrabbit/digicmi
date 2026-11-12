@@ -1,17 +1,18 @@
 /* digicmi: the CMI machine's two SRC pages (machine-pages 1.4+, cm_ui_v33).
  *
- * Page 1 "CMI":       A TUNE, B RETRO (switch), C ENG (switch), D SAMP / E SPRD, F-G blank, H LEV.
+ * Page 1 "CMI":       A TUNE, B RETRO (switch), C ENG (switch), D SAMP / E SPRD, F ROOT, G blank, H LEV.
  * Page 2 "CMI LOOP":  drawn here in the Digitakt II's waveform-page style (digicmi_wave_draw): value boxes
- *                     for A PLAY, (B empty), C LMOD, D LFIN along the top, the sample's waveform with dotted
- *                     STRT, END, loop-start and loop-end marks, and E STRT, F LEN, G LOOP, H LEV along the
- *                     bottom. With ENG = TIME: A PLAY (the order of the waves), B BLND, the sample with the 16
- *                     waves' places between STRT and END, and E STRT, F LEN, G TIME, H LEV. The page's SMP box and LEV fader stay on the left.
+ *                     along the top, the sample's waveform with dotted STRT, END and loop marks, labels along
+ *                     the bottom. ENG = SMPL: A PLAY, (B empty), C LMOD, (D empty) / E STRT, F LEN, G LOOP, H LEV.
+ *                     ENG = TIME: A PLAY, B BLND, C SMEAR, D TIME / E STRT, F LEN, G LOOP, H LEV, with the 16
+ *                     waves' places between STRT and END. The page's SMP box and LEV fader stay on the left.
  * PLAY: REV, REV.L, FWD.L, FWD, and P (ping-pong between the loop points; cmi_loop.c). TUNE, PLAY, SAMP,
  * STRT, LEN, LOOP and LEV are the sound's slots 17-24 (ONESHOT's meaning: CMI renders as ONESHOT). The rest
  * are machine-pages' extra values in slots 46-51 (p-locks, LFOs, copy/paste, the project save):
  *   (LLEN, extra 8 / slot 46: on no page since 0.13; the loop runs from LOOP to END)
  *   LMOD  (with ENG = TIME: SMEAR, timesynth.c) HOLD (loops on after release) or SUS (loops while held, then plays on to the end, or the start)
- *   LFIN  fine loop start: one LOOP step divided into 128 (with ENG = TIME: ROOT, 0 AUTO or a MIDI note)
+ *   TIME  (page 2 D, TIME only; was LFIN, the fine loop start, until 0.19)
+ *   ROOT  (page 1 F, TIME only) the sample's pitch: AUTO (detected) or a note
  *   RETRO a switch: the sample as a CMI Series I voice plays it: 8 bits at 24 kHz, its clock following the
  *         note's pitch (cmi_loop.c, digicmi_render)
  *   ENG   a switch: SMPL, or TIME (the time synth, timesynth.c: single cycles cut from the sample, played in turn)
@@ -23,7 +24,8 @@
 
 #define EX_LLEN 8
 #define EX_LMOD 9
-#define EX_LFIN 11
+#define EX_LFIN 11                              /* slot 49: TIME (the time synth's) since 0.20; LFIN before */
+#define EX_ROOT 14                              /* slot 52: ROOT (the time synth's) since 0.20 */
 #define EX_8BIT 12
 #define EX_ENG  13
 #define EX_SPRD 10
@@ -100,22 +102,27 @@ static char *put_note(char *b, int n)
     return put_u(b, (unsigned)(n / 12 - 2));
 }
 
-/* D: LFIN, or with ENG = TIME the time synth's ROOT: 0 AUTO (with the note found), else MIDI note 23 + value */
-static int32_t fmt_lfin(char *buf, int32_t v, int32_t ctx, int32_t m)
+/* Page 1 F: the time synth's ROOT (slot 52): 0 AUTO (with the note found), else MIDI note 23 + value. A value
+ * with a low byte (Digi Poly's marker, 0x4b53, in kits from before 0.20) is AUTO. */
+static int root_note_of(int32_t v)
 {
-    int au, fd, n;
-    (void)m;
+    v &= 0xffff;
+    if (v & 0xff)
+        return 0;
     v = (v >> 8) & 127;
-    if (!time_mode()) {
-        put_u(buf, (unsigned)v);
-        return 1;
-    }
-    if (v) {
-        put_note(buf, v + 23 > 108 ? 108 : v + 23);
+    return v ? (v + 23 > 108 ? 108 : v + 23) : 0;
+}
+
+static int32_t fmt_root(char *buf, int32_t v, int32_t ctx, int32_t m)
+{
+    int au, fd, n = root_note_of(v);
+    (void)m;
+    if (n) {
+        put_note(buf, n);
         return 1;
     }
     n = digicmi_ts_root(&au, &fd);
-    if (!ctx || !au)
+    if (!ctx || !time_mode())
         put_s(buf, "AUTO");
     else if (fd)
         put_note(put_s(buf, "AUTO "), n);      /* "AUTO G#3": 8 */
@@ -159,19 +166,16 @@ static int32_t fmt_pos(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
-/* G: LOOP, or with ENG = TIME the pass's time, 0.05 s x 2^(G/15) (timesynth.c), as seconds */
+/* Page 2 D with ENG = TIME: the pass's time, 0.05 s x 2^(T/15), T = D x 120 / 127 (timesynth.c), as seconds */
 static const unsigned short exp2n[17] = {       /* 2^(-i/16), Q15 */
     32768, 31379, 30048, 28774, 27554, 26386, 25268, 24196, 23170, 22188, 21247, 20347,
     19484, 18658, 17867, 17109, 16384
 };
 
-static int32_t fmt_loop(char *buf, int32_t v, int32_t ctx, int32_t m)
+static char *put_secs(char *buf, unsigned g)
 {
-    unsigned g, ms;
+    unsigned ms;
     char *b;
-    if (!time_mode())
-        return fmt_pos(buf, v, ctx, m);
-    g = (unsigned)(v >> 8) & 255u;
     g = g > 120 ? 120 : g;
     ms = (50u << (g / 15)) * 32768u / exp2n[(g % 15) * 16 / 15];
     b = buf;
@@ -187,6 +191,16 @@ static int32_t fmt_loop(char *buf, int32_t v, int32_t ctx, int32_t m)
     }
     *b++ = 'S';
     *b = 0;
+    return b;
+}
+
+static int32_t fmt_time(char *buf, int32_t v, int32_t ctx, int32_t m)
+{
+    (void)ctx; (void)m;
+    if (!time_mode())
+        put_s(buf, "-");                        /* TIME only (sample mode's D is empty since 0.20) */
+    else
+        put_secs(buf, ((unsigned)(v >> 8) & 127u) * 120u / 127u);
     return 1;
 }
 
@@ -201,8 +215,6 @@ static int32_t fmt_play(char *buf, int32_t v, int32_t ctx, int32_t m)
 }
 
 static int page2_age = 1000;                    /* UI ticks since page 2 was last drawn (1000: not on show) */
-static int g_age = 1000, last_g = -1;           /* UI ticks since G last moved: its value shows meanwhile */
-#define G_HOLD 60
 void digicmi_ts_tick(void);
 int digicmi_ts_pos(int v);
 
@@ -355,11 +367,9 @@ void digicmi_page_tick(void *ctrl)
     digicmi_ts_tick();                          /* timesynth.c: the waves, when track 1's sample, STRT or LEN change */
     if (page2_age < 1000)
         page2_age++;
-    if (g_age < 1000)
-        g_age++;
     for (v = 0; v < 8; v++)
         any |= digicmi_voice_pos(v, &pos, &vl);
-    if (page2_age < 1000 && (any || was || g_age == G_HOLD) && ctrl)   /* also once to put TIME back */
+    if (page2_age < 1000 && (any || was) && ctrl)
         *((unsigned char *)ctrl + 0x20) = 1;
     was = any;
 }
@@ -378,27 +388,17 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     shown.on = 0;
     fw_fillrect(bmp, PX0, 8, 127, 54, 0);        /* the page's knobs go; its bottom labels stay */
     vbox(bmp, 0, shown.play < 5 ? plays[shown.play] : "?", 0);
-    if (shown.eng >= 96) {                       /* TIME: B BLND, C SMEAR (LMOD's slot); D does nothing here */
+    if (shown.eng >= 96) {                       /* TIME: B BLND, C SMEAR (LMOD's slot), D TIME (slot 49) */
         put_u(put_s(b, "B"), (unsigned)shown.blnd);
         vbox(bmp, 1, b, 0);
         put_u(put_s(b, "S"), (unsigned)shown.lmod);
         vbox(bmp, 2, b, !shown.lmod);
-        {                                        /* D: ROOT, "A" and the note found when AUTO */
-            int au, fd, n = digicmi_ts_root(&au, &fd);
-            char *e = b;
-            if (!shown.lfin)
-                e = put_s(b, "A ");
-            if (!shown.lfin && !fd)
-                put_s(e, "C3?");
-            else
-                put_note(e, shown.lfin ? (shown.lfin + 23 > 108 ? 108 : shown.lfin + 23) : n);
-            vbox(bmp, 3, b, 0);
-        }
+        put_secs(b, (unsigned)shown.lfin * 120u / 127u);
+        vbox(bmp, 3, b, 0);
     } else {
-        vbox(bmp, 1, "", 1);                     /* B: an empty place, as the Digitakt II draws one */
+        vbox(bmp, 1, "", 1);                     /* B and D: empty places, as the Digitakt II draws them */
         vbox(bmp, 2, shown.lmod < 64 ? "HOLD" : "SUS", 0);
-        put_u(put_s(b, "F"), (unsigned)shown.lfin);
-        vbox(bmp, 3, b, !shown.lfin);
+        vbox(bmp, 3, "", 1);
     }
 
     e = (const volatile uint32_t *)(SMP_TAB + 16 * (uint32_t)shown.slot);
@@ -419,6 +419,8 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
             fw_fillrect(bmp, WX0 + c, WMID + lo[c], WX0 + c, WMID + hi[c], 1);
     }
     endv = clampi(shown.strt + shown.len, 0, FULL);
+    loopv = clampi(shown.g ? clampi(shown.g - 1, 0, FULL) : shown.strt, shown.eng >= 96 ? shown.strt : 0, endv);
+    looped = shown.play == 1 || shown.play == 2 || shown.play == 4;
     if (shown.eng >= 96) {                       /* TIME: the 16 waves' places, a tick above the wave each,
                                                     STRT and END dotted, an arrow per note at its place in the pass */
         int a = col_of(shown.strt), z = col_of(endv);
@@ -438,18 +440,13 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
                 fw_fillrect(bmp, clampi(x - 2, PX0, 127), 8, clampi(x + 2, PX0, 127), 8, 1);
             }
         }
-        if (shown.g != last_g) {                 /* G turned: the page shows its value (fmt_loop) a while */
-            if (last_g >= 0)
-                g_age = 0;
-            last_g = shown.g;
-        }
-        if (g_age >= G_HOLD) {                   /* else G's label: TIME here, not LOOP */
-            fw_fillrect(bmp, col_x[2] - 12, 0, col_x[2] + 12, 7, 0);
-            fw_textf(bmp, fw_font5, col_x[2] - 7, 1, -1, "TIME");
+        if (looped) {                            /* LOOP's place, dotted with a bar on top, as the sample's */
+            int l = col_of(loopv);
+            dotted(bmp, l);
+            fw_fillrect(bmp, WX0 + l, WMID + WHALF + 2, clampi(WX0 + l + 2, 0, 127), WMID + WHALF + 2, 1);
         }
         return;
     }
-    loopv = clampi((shown.g ? clampi(shown.g - 1, 0, FULL) : shown.strt) + 2 * shown.lfin, 0, endv);
     le = endv;                                   /* the loop runs to END */
     for (c = 0; c < 8; c++) {                    /* the playheads: an arrow under the wave for each note */
         int pos;
@@ -461,7 +458,6 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
             fw_fillrect(bmp, clampi(x - 2, PX0, 127), 8, clampi(x + 2, PX0, 127), 8, 1);
         }
     }
-    looped = shown.play == 1 || shown.play == 2 || shown.play == 4;
     dotted(bmp, col_of(shown.strt));             /* STRT and END */
     dotted(bmp, col_of(endv));
     if (looped) {                                /* the loop: dotted, with a short bar on top of each end */
@@ -477,7 +473,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     .cc = c, .min = 0, .max = 127 << 8, .def = (d) << 8, .fmt = f }
 
 static const struct cm_src_page pages[2] = {
-    {"CMI", {0, EX_8BIT, EX_ENG, 3, EX_SPRD, B, B, 7}, 0, {0, 0, 0}},
+    {"CMI", {0, EX_8BIT, EX_ENG, 3, EX_SPRD, EX_ROOT, B, 7}, 0, {0, 0, 0}},
     {"CMI LOOP", {1, EX_BLND, EX_LMOD, EX_LFIN, 4, 5, 6, 7}, 0, {0, 0, 0}},   /* drawn by digicmi_wave_draw */
 };
 
@@ -493,23 +489,20 @@ const struct cm_ui32 digicmi_page = {
                     .min = 0, .max = 0x7800, .def = 0, .fmt = fmt_pos },
             [5] = { .name = "LEN", .lname = "Sample Length", .look = 0x71, .flags = CM_RANGE | CM_DEFAULT,
                     .min = 0, .max = 0x7800, .def = 0x7800, .fmt = fmt_pos },
-            [6] = { .name = "LOOP", .lname = "Loop/Time", .look = 0x72, .flags = CM_RANGE | CM_DEFAULT,
-                    .min = 0, .max = 0x7802, .def = 0, .fmt = fmt_loop },
+            [6] = { .name = "LOOP", .lname = "Loop Position", .look = 0x72, .flags = CM_RANGE | CM_DEFAULT,
+                    .min = 0, .max = 0x7802, .def = 0, .fmt = fmt_pos },
         } },
     .extra = {
         EXTRA("BLND", "Wave Blend", 127, fmt_num, 24),      /* slot 46: the time synth's (0.3-0.12's LLEN) */
         { .name = "LMOD", .lname = "Loop Mode/Smear", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 25, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_lmod, .draw = lmod_draw },
         EXTRA("SPRD", "Stereo Spread", 0, fmt_sprd, 26),     /* slot 48 (0.3-0.6's DIR): cmi_loop.c */
-        EXTRA("LFIN", "Loop Fine/Root", 0, fmt_lfin, 27),     /* TIME: ROOT (timesynth.c) */
+        EXTRA("TIME", "Wave Pass Time", 64, fmt_time, 27),   /* slot 49, TIME only (0.3-0.19's LFIN; timesynth.c) */
         { .name = "RETRO", .lname = "Retro", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 28, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_retro, .draw = switch_draw },
         { .name = "ENG", .lname = "Engine", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 29, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_eng, .draw = switch_draw },
-        /* 14: on no page, but machine-pages refuses the whole page unless all seven are valid. It is slot 52,
-         * kitstore's marker, so its default is the marker itself (KS_MARK, 0x4b53) and a switch keeps it. */
-        { .name = "-", .lname = "Unused", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT, .max = 0x7f00,
-          .def = 0x4b53 },
+        EXTRA("ROOT", "Root (Time Synth)", 0, fmt_root, 30),  /* slot 52 (Digi Poly's marker until 0.19) */
     },
     .page_count = 2, .pages = pages,
 };

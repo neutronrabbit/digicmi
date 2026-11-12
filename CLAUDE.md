@@ -207,6 +207,14 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Measured (digiemu, `DIGICMI_TESTWAVE=sine|saw|noise`, `DIGICMI_TESTHZ`): sine 440 -> 440.4 Hz, saw 196 -> 195.9 Hz (shown G2), ROOT C3 on the sine -> 262.3 Hz, noise -> C3 fallback. Not measured: detection cost on hardware, real recorded samples.
 - mod.json 0.19: description rewritten for SMPL/TIME, author "neutronrabbit (fork of Digi Poly 2.1 by gdeo607 / digi1_mods, MIT)". Build `build/digicmi-0.19.syx` (CM19).
 
+## Loop layout for TIME, LFIN gone, ROOT on page 1 (0.20)
+
+- LFIN removed from both engines (cmi_loop.c ignores slot 49 for loops). Slot 49 / extra 11 is now **TIME** (TIME only; 0-127 -> T = v x 120 / 127, 0.05 s x 2^(T/15); default 64 = 0.8 s), page 2 D. Sample mode's D box is empty.
+- TIME's **LOOP** = G (slot 23) as in sample mode: `ts_loop_frame` maps LOOP's place between STRT and END to a wave position (16.16 of 0-15; G 0 = STRT). FWD.L wraps to it, REV.L runs from the last wave down to it then wraps to the last, P goes first->last then bounces between last and it. Measured: LOOP 60 -> 7.5; FWD.L jumps back to ~7.5, REV.L wraps at ~7.5, P turns at 7.50 and 15.00.
+- **ROOT** = extra 14 = slot 52 (CC 30), page 1 F. Slot 52 was Digi Poly's kitstore marker: `kstore_tick` only rewrote the marker (mask 0 since 0.10), so the call and its state are gone. Values with a low byte (the marker 0x4b53 in older kits) read as AUTO. machine-pages saves all seven extras with the project (packed sound record v4), so slots 46-52 do persist for CMI sounds.
+- G's fmt is plain fmt_pos again; the 0.18 TIME label overlay and seconds-while-turning on G are gone (TIME shows seconds in its own D box).
+- Build `build/digicmi-0.20.syx` (CM20); digiemu only.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.
