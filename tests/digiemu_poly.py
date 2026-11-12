@@ -22,7 +22,7 @@ and level mirroring) in seconds. This one boots the firmware and checks what onl
      which is exactly the condition the record path runs under.
 Prints a report and PASS/FAIL.
 """
-import argparse, json, os, struct, sys, time, types, zlib
+import argparse, json, math, os, struct, sys, time, types, zlib
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--digiemu", required=True)
@@ -159,7 +159,7 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
     tap(20, 20, 150); at(250, "snap", "q0_src_page")
     tap(20, 20, 150); at(250, "snap", "q0_src_page2")
     PAGES_END = t + 2                           # DIGICMI_PAGES_ONLY: stop here, no playback or sound checks
-    if os.environ.get("DIGICMI_INSNPROF"):      # instructions inside the audio render, by owner: idle, then 4 notes held
+    if os.environ.get("DIGICMI_INSNPROF") and not os.environ.get("DIGICMI_PILEUP"):   # idle, then 4 notes held
         at(0, "chord", (0x44, 0x47, 0x4b))
         at(200, "prof", "idle")
         at(400, "wait")
@@ -177,6 +177,20 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
             at(4, "encoder", 7, 4)
         for d_, nm in ((10, "a"), (60, "b"), (150, "c"), (300, "d"), (600, "e")):
             at(d_, "snap", "q5_gturn_" + nm)
+        PAGES_END = t + 2
+    if os.environ.get("DIGICMI_SLURTEST"):      # legato: track 1's key held, track 2's key pressed; then a detached note
+        at(0, "chord", (0x40, 0x40, 0x40))
+        at(1, "phase", "slur"); at(1, "press", 24); at(60, "press", 25); at(60, "release", 25); at(5, "release", 24)
+        at(200, "press", 26); at(60, "release", 26); at(200, "wait"); at(0, "phase", None)
+        PAGES_END = t + 2
+    if os.environ.get("DIGICMI_PILEUP"):        # six notes played and released, then nothing: which voices stay on
+        at(0, "chord", (0x40, 0x40, 0x40))
+        for k_ in range(6):
+            at(1, "press", 24); at(30, "release", 24); at(30, "wait")
+        for k_ in range(8):
+            at(150, "voices", "after %d steps idle" % (150 * (k_ + 1)))
+        if os.environ.get("DIGICMI_INSNPROF"):
+            at(10, "prof", "6 released notes piled up"); at(400, "wait")
         PAGES_END = t + 2
     if os.environ.get("DIGICMI_OVERLAP"):       # note 1 played and released, note 2 while note 1's long decay rings
         at(0, "chord", (0x40, 0x40, 0x40))
@@ -318,6 +332,12 @@ def spin(m, pc, *args, **kw):
             st = (snd - kit - 0x20) // 0xa2 if snd else v
             starts.setdefault(ph, []).append((state["n"], v, note, mid, st))
         uc.hook_add(UC_HOOK_CODE, vstart, begin=VOICE_START, end=VOICE_START)
+        if os.environ.get("DIGICMI_PILEUP") and "digicmi_stage" in MAP:
+            def stg_(u, ad, s_, d):
+                v_ = struct.unpack(">i", u.mem_read(u.reg_read(UC_M68K_REG_A7) + 4, 4))[0]
+                sc_ = state.setdefault("stagecalls", {})
+                sc_[v_] = sc_.get(v_, 0) + 1
+            uc.hook_add(UC_HOOK_CODE, stg_, begin=MAP["digicmi_stage"], end=MAP["digicmi_stage"])
         if os.environ.get("DIGICMI_REDRAWTEST") and "digicmi_wave_draw" in MAP:
             def frame_(u, ad, s_, d):
                 if state.get("fr_on"):
@@ -419,7 +439,7 @@ def spin(m, pc, *args, **kw):
                     struct.unpack(">i", u.mem_read(0x80001f28 + 4 * v, 4))[0] >> 16,
                     u.mem_read(base + 0x28, 1)[0], struct.unpack(">I", u.mem_read(base + 0x14, 4))[0],
                     struct.unpack(">i", u.mem_read(AMP + 12 * v, 4))[0], cmi_voice(u, v)))
-            if LOOPTEST:
+            if LOOPTEST or os.environ.get("DIGICMI_SLURTEST"):
                 uc.hook_add(UC_HOOK_CODE, lambda u, ad, s_, d: vrec(u, 0), begin=PLAYREAD0, end=PLAYREAD0)
                 uc.hook_add(UC_HOOK_CODE, lambda u, ad, s_, d: vrec(u, u.reg_read(UC_M68K_REG_D4)),
                             begin=0x400759ac, end=0x400759ac)
@@ -584,6 +604,21 @@ def spin(m, pc, *args, **kw):
                            uc.hook_add(UC_HOOK_CODE, out_, begin=0x400784c8, end=0x400784c8),
                            uc.hook_add(UC_HOOK_CODE, ins_, begin=0, end=0xffffffff)]
             uc.ctl_flush_tb()                    # hooks added mid-run apply only to code translated afterwards
+        elif k == "holdv0":                      # voice 0 held as a held MIDI key holds it (OWNER = 2: live)
+            state["holdv0"] = act[1]
+            env0 = struct.unpack(">ii", uc.mem_read(AMP, 8))
+            log.append("holdv0 %d at step %d: voice 0 AMP phase %d level %d" % (act[1], state["n"], env0[0], env0[1]))
+        elif k == "voices":
+            on_ = []
+            for v_ in range(8):
+                vs_ = 0x8000EDC4 + 94 * v_
+                env_ = struct.unpack(">ii", uc.mem_read(AMP + 12 * v_, 8))
+                if uc.mem_read(vs_ + 0x28, 1)[0]:
+                    on_.append("v%d ph%d %.0fdB" % (v_, env_[0], 20 * __import__("math").log10(max(abs(env_[1]), 1) / 2 ** 31)))
+            log.append("voices on, %s: %d  %s" % (act[1], len(on_), " ".join(on_)))
+            if "fade_end" in MAP:
+                log.append("   fade_end %s, end-reached bytes %s, stage calls %s" % (list(uc.mem_read(MAP["fade_end"], 8)),
+                           [uc.mem_read(0x8000EDC4 + 94 * v_ + 0x29, 1)[0] for v_ in range(8)], state.get("stagecalls")))
         elif k == "frames":
             state["fr_on"] = act[1]
             if act[1]:
@@ -635,6 +670,12 @@ def spin(m, pc, *args, **kw):
                 for k_ in (kit, ek):             # PLAY = FWD.L (2), LOOP = 60 (half way), on both kits' sound
                     uc.mem_write(k_ + 0x20 + 0x14 + 2 * 18, struct.pack(">h", PROBE_PLAY << 8))
                     uc.mem_write(k_ + 0x20 + 0x14 + 2 * 23, struct.pack(">h", PROBE_LOOP << 8))
+                if os.environ.get("DIGICMI_SLUR") is not None:    # SLUR (slot 52) on both kits and every voice copy
+                    sv_ = int(os.environ["DIGICMI_SLUR"]) << 8
+                    for k_ in (kit, ek):
+                        uc.mem_write(k_ + 0x20 + 0x14 + 2 * 52, struct.pack(">h", sv_))
+                    for w in range(8):
+                        uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + 52), struct.pack(">h", sv_))
                 if os.environ.get("DIGICMI_AMPDEC") is not None:  # AMP decay (kit slot 40: the range table says 41)
                     dv_ = int(os.environ["DIGICMI_AMPDEC"]) << 8
                     for k_ in (kit, ek):
@@ -747,6 +788,8 @@ def spin(m, pc, *args, **kw):
     if state.get("lr_on"):
         tb = struct.unpack(">256i", uc.mem_read(0x80001a18, 1024))
         state["lr"][state["lr_on"]].append(sum(abs(x) >> 8 for x in tb))
+    if state.get("holdv0"):
+        uc.mem_write(OWNER, struct.pack(">i", 2))
     state["n"] += 1
     r = _spin(m, pc, *args, **kw)
     if state["n"] >= STEPS:
@@ -1155,6 +1198,10 @@ for pr in state.get("prof", []):
         print("   %-14s %5.1f%%  %7.0f a block" % (o_, 100.0 * n_ / tot, n_ / max(pr["blocks"], 1)))
     for f_, n_ in sorted(pr["fn"].items(), key=lambda x: -x[1])[:6]:
         print("      digicmi %-22s %6.0f a block" % (f_, n_ / max(pr["blocks"], 1)))
+if os.environ.get("DIGICMI_SLURTEST"):
+    for r in state.get("vr", []):
+        if r[6] and r[11]:                        # a CMI voice's first block: where its note starts
+            print("note start: step %d voice %d window %d..%d PLAY %d" % (r[0], r[1], r[2], r[3], r[4]))
 if state.get("frames"):
     for k, (n_, steps_) in state["frames"].items():
         print("frames %s: %d in %d steps" % (k, n_, steps_))
