@@ -1,6 +1,6 @@
 {
  "id": "digicmi",
- "version": "0.16",
+ "version": "0.17",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "digicmi (from gdeo607 Digi Poly 2.1, MIT)",
@@ -14,7 +14,7 @@
   "cmi_page.c",
   "cmi_loop.c",
   "cmi_loop.s",
-  "spectral.c"
+  "timesynth.c"
  ],
  "requires": [
   "core",

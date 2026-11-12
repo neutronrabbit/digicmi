@@ -1,0 +1,223 @@
+/* digicmi: the time synth (ENG = TIME), after the CMI's waveform synthesis: a sound is a series of single-cycle
+ * waveforms played one after another while the note sounds, so its timbre moves through them. On the CMI they
+ * were drawn with the light pen; here they are cut from the track's sample.
+ *
+ * Tables: TS_FRAMES single cycles of TS_LEN samples (Q15, one extra sample for the wrap), cut from track 1's
+ * sample at evenly spaced places between STRT and END (STRT + LEN). Each cycle is one period of C3 (MIDI 60,
+ * 261.63 Hz: 183.47 samples at 48 kHz), the root the sample is assumed to be at, starting at the first upward
+ * zero crossing after its place and resampled to TS_LEN; a straight ramp takes out the difference between its
+ * two ends so it loops without a click. All frames share one scale (the loudest frame's peak to 29000), so
+ * quiet parts of the sample stay quieter. The tables are rebuilt in the UI tick when the sample, STRT or LEN
+ * change, into the bank the render is not reading, then switched in one store.
+ * Per voice (cmi_loop.c's digicmi_render calls ts_voice), from the voice's own smoothed values:
+ *   A, slot 18 (PLAY 0-4) the order: 3 FWD once, 0 REV once, 2 FWD.L loop, 1 REV.L loop, 4 P ping-pong
+ *   G, slot 23 (0-120)    TIME of a whole pass: 0.05 s x 2^(G/15), to about 13 s
+ *   B, slot 46 (0-127)    BLND: 0 steps from wave to wave (the CMI's segments), 127 crossfades all the way
+ * The voice's pitch is its stock player's: while ENG = TIME the player loops the track's sample silently
+ * (cmi_loop.c) and its playhead's move per block is the pitch ratio, TUNE, bends and LFOs in. The block it
+ * writes is scaled as the sample's would be (gain x 0.81), so the AMP envelope, filter, pan, RETRO and SPREAD
+ * act on it as on a sample. */
+#include "digitakt-mk1/core3.h"
+
+typedef unsigned int u32;
+
+#define TS_FRAMES  16
+#define TS_LEN     256
+#define LAST_FRAME ((TS_FRAMES - 1) << 16)
+#define ROOT_INC   91443u                           /* 261.6256 Hz / 48 kHz x 2^32, / 256 */
+#define CYCLE      12023779u                        /* 48000 / 261.6256 samples, 16.16 */
+#define FULL       0x7800                           /* 120.0: STRT and LEN's scale */
+#ifdef OS154
+#define SMP_TAB    0x4031a3a0u
+#else
+#define SMP_TAB    0x403193a0u
+#endif
+
+static short tab[2][TS_FRAMES][TS_LEN + 1];
+static volatile int bank = -1;                      /* the bank the render reads; -1 none built yet */
+static const short *built_pcm;
+static u32 built_len;
+static int built_strt = -1, built_lenv = -1;
+
+static const unsigned short exp2n[17] = {           /* 2^(-i/16), Q15 */
+    32768, 31379, 30048, 28774, 27554, 26386, 25268, 24196, 23170, 22188, 21247, 20347,
+    19484, 18658, 17867, 17109, 16384
+};
+
+static u32 scale(u32 val, u32 len)                  /* val / 120.0 of len, without 64-bit sums */
+{
+    return (len / FULL) * val + ((len % FULL) * val) / FULL;
+}
+
+/* The sample at st + n / TS_LEN of a cycle, linearly interpolated. */
+static int at(const short *pcm, u32 st, u32 n)
+{
+    u32 off = n * (CYCLE / TS_LEN);                 /* 16.16 */
+    u32 i = st + (off >> 16);
+    int a = pcm[i], b = pcm[i + 1];
+    return a + ((b - a) * (int)((off & 0xffff) >> 1) >> 15);
+}
+
+static void build(int into, const short *pcm, u32 len, int strt, int lenv)
+{
+    u32 st[TS_FRAMES], s0, se, span, need = (CYCLE >> 16) + 3;
+    int f, n, peak = 1, drift[TS_FRAMES];
+    if (!pcm || len < need + 2) {                   /* no sample: silence */
+        for (f = 0; f < TS_FRAMES; f++)
+            for (n = 0; n <= TS_LEN; n++)
+                tab[into][f][n] = 0;
+        return;
+    }
+    s0 = scale((u32)strt, len);
+    se = scale((u32)(strt + lenv > FULL ? FULL : strt + lenv), len);
+    if (s0 > len - need)
+        s0 = len - need;
+    if (se > len)
+        se = len;
+    span = se > s0 + need ? se - s0 - need : 0;
+    for (f = 0; f < TS_FRAMES; f++) {
+        u32 c = s0 + span / (TS_FRAMES - 1) * (u32)f + (span % (TS_FRAMES - 1)) * (u32)f / (TS_FRAMES - 1), i;
+        u32 lim = c + (CYCLE >> 16);
+        st[f] = c;
+        if (lim > len - need)
+            lim = len - need;
+        for (i = c + 1; i <= lim; i++)              /* the first upward zero crossing */
+            if (pcm[i - 1] < 0 && pcm[i] >= 0) {
+                st[f] = i;
+                break;
+            }
+        drift[f] = at(pcm, st[f], TS_LEN) - at(pcm, st[f], 0);
+        for (n = 0; n < TS_LEN; n++) {
+            int x = at(pcm, st[f], (u32)n) - drift[f] * n / TS_LEN;
+            x = x < 0 ? -x : x;
+            if (x > peak)
+                peak = x;
+        }
+    }
+    for (f = 0; f < TS_FRAMES; f++) {
+        for (n = 0; n < TS_LEN; n++)
+            tab[into][f][n] = (short)((at(pcm, st[f], (u32)n) - drift[f] * n / TS_LEN) * 29000 / peak);
+        tab[into][f][TS_LEN] = tab[into][f][0];
+    }
+}
+
+/* UI tick: track 1's sample, STRT and LEN; the tables rebuilt when they change. */
+void digicmi_ts_tick(void)
+{
+    uint8_t *kit = fw_kit, *snd;
+    const volatile u32 *e;
+    const short *pcm;
+    u32 len;
+    int strt, lenv;
+    if (!kit)
+        return;
+    snd = FW_SOUND(kit, 0);
+    if (snd[FW_SOUND_MACHINE] != 40)
+        return;
+#define W(k) (*(int16_t *)(snd + 0x14 + 2 * (k)))
+    e = (const volatile u32 *)(SMP_TAB + 16u * (u32)((W(20) >> 8) & 255));
+    strt = W(21);
+    lenv = W(22);
+#undef W
+    strt = strt < 0 ? 0 : strt > FULL ? FULL : strt;
+    lenv = lenv < 0 ? 0 : lenv > FULL ? FULL : lenv;
+    pcm = (const short *)e[0];
+    len = e[2];
+    if ((u32)pcm < 0x40000000u || len <= 248u)      /* the slots' silent dummy */
+        pcm = 0;
+    if (bank >= 0 && pcm == built_pcm && len == built_len && strt == built_strt && lenv == built_lenv)
+        return;
+    build(bank == 0 ? 1 : 0, pcm, len, strt, lenv);
+    bank = bank == 0 ? 1 : 0;
+    built_pcm = pcm;
+    built_len = len;
+    built_strt = strt;
+    built_lenv = lenv;
+}
+
+/* ---- the voices ---- */
+static u32 phase[8];
+static int fpos[8], fdir[8], last_pos[8], rate[8];
+
+/* Voice v's place in the pass, 0-65535 across the frames, for the page's arrows. */
+int digicmi_ts_pos(int v)
+{
+    return (unsigned)v < 8 ? (int)((unsigned)fpos[v] / (TS_FRAMES - 1)) : 0;
+}
+
+/* Render-task: voice v's block from the tables. play_pos is the stock player's playhead (its move per block is
+ * the pitch), mode PLAY's 0-4, time G's 0-120, blend B's 0-127, gain the voice's (V + 0x10), start a note's
+ * first block. */
+void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, int gain, int start)
+{
+    const short (*t)[TS_LEN + 1];
+    int adv, i, f0, f1, ff, blocks, whole, scl, width;
+    u32 inc;
+    if ((unsigned)v > 7)
+        return;
+    if (bank < 0 || gain <= 0) {
+        for (i = 0; i < 32; i++)
+            b[i] = 0;
+        return;
+    }
+    t = (const short (*)[TS_LEN + 1])tab[bank];
+    adv = play_pos - last_pos[v];
+    adv = adv < 0 ? -adv : adv;
+    last_pos[v] = play_pos;
+    if (start) {
+        phase[v] = 0;
+        rate[v] = 1 << 16;
+        fdir[v] = mode == 0 || mode == 1 ? -1 : 1;
+        fpos[v] = fdir[v] < 0 ? LAST_FRAME : 0;
+    } else if (adv > 0 && adv < 4096)
+        rate[v] = adv << 11;                        /* adv / 32 output samples, 16.16 */
+    inc = ROOT_INC * (u32)(rate[v] >> 8);
+
+    /* the pass, once a block: a whole one takes 75 x 2^(G/15) blocks */
+    time = time < 0 ? 0 : time > 120 ? 120 : time;
+    whole = time / 15;
+    blocks = (int)(((u32)(75 << whole) * 32768u) / exp2n[(time % 15) * 16 / 15]);
+    if (blocks < 1)
+        blocks = 1;
+    if (!start)
+        fpos[v] += fdir[v] * (LAST_FRAME / blocks + 1);
+    if (fpos[v] > LAST_FRAME) {
+        if (mode == 2)                              /* FWD.L: round again */
+            fpos[v] = 0;
+        else if (mode == 4) {                       /* P: back */
+            fpos[v] = LAST_FRAME;
+            fdir[v] = -1;
+        } else
+            fpos[v] = LAST_FRAME;                   /* FWD: stay on the last wave */
+    } else if (fpos[v] < 0) {
+        if (mode == 1)                              /* REV.L */
+            fpos[v] = LAST_FRAME;
+        else if (mode == 4) {
+            fpos[v] = 0;
+            fdir[v] = 1;
+        } else
+            fpos[v] = 0;
+    }
+    f0 = fpos[v] >> 16;
+    f1 = f0 < TS_FRAMES - 1 ? f0 + 1 : f0;
+    ff = (fpos[v] & 0xffff) >> 1;                   /* 15 bits */
+    blend = blend < 0 ? 0 : blend > 127 ? 127 : blend;
+    width = blend * 32768 / 127;                    /* the crossfade's share of the way between two waves */
+    if (width <= 0)
+        ff = ff >= 16384 ? 32768 : 0;
+    else if (width < 32768) {
+        ff = (ff - (32768 - width) / 2) * 32768 / width;
+        ff = ff < 0 ? 0 : ff > 32768 ? 32768 : ff;
+    }
+    scl = (int)((((u32)gain >> 15) * 207u) >> 8);   /* gain x 0.81, as a sample's block */
+
+    for (i = 0; i < 32; i++) {
+        u32 p = phase[v];
+        int idx = (int)(p >> 24), fr = (int)((p >> 9) & 0x7fff);
+        int a = t[f0][idx] + ((t[f0][idx + 1] - t[f0][idx]) * fr >> 15);
+        int c = t[f1][idx] + ((t[f1][idx + 1] - t[f1][idx]) * fr >> 15);
+        int s = a + ((c - a) * ff >> 15);
+        b[i] = s * scl;
+        phase[v] = p + inc;
+    }
+}
