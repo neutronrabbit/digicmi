@@ -1,6 +1,10 @@
 # Changelog
 
-Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.24 only in digiemu.
+Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.25 only in digiemu.
+
+## 0.25 (2026-11-12): released notes ring on
+
+A MIDI note took track 1's own voice whenever no key held it, cutting the previous note's release tail, so with SPRD the old note seemed to jump to the new note's side and the two sides never overlapped. Each new MIDI note now takes the quietest free voice. Known issue: track 1's own sequencer trigs still share one voice.
 
 ## 0.24 (2026-11-12): SUS plays the tail
 

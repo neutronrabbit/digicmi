@@ -64,7 +64,7 @@ from unicorn import UC_HOOK_CODE
 from unicorn.m68k_const import (UC_M68K_REG_A2, UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_A6, UC_M68K_REG_A7,
                                  UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D4)
 import emu.gui as G
-if os.environ.get("DIGICMI_LRTEST"):              # the SSI's output frames, left/right, while a note is measured
+if os.environ.get("DIGICMI_LRTEST") or os.environ.get("DIGICMI_OVERLAP"):   # the SSI's output frames, left/right
     import emu.ssi as _ssi
     def _lr_sink(data):
         on = state.get("lr_on") if "state" in globals() else None
@@ -177,6 +177,13 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
             at(4, "encoder", 7, 4)
         for d_, nm in ((10, "a"), (60, "b"), (150, "c"), (300, "d"), (600, "e")):
             at(d_, "snap", "q5_gturn_" + nm)
+        PAGES_END = t + 2
+    if os.environ.get("DIGICMI_OVERLAP"):       # note 1 played and released, note 2 while note 1's long decay rings
+        at(0, "chord", (0x40, 0x40, 0x40))
+        at(1, "press", 24); at(15, "lr", "note 1 alone"); at(40, "lr", None); at(5, "release", 24)
+        at(30, "wait")
+        at(1, "press", 24); at(15, "lr", "note 2, note 1 decaying"); at(60, "lr", None); at(5, "release", 24)
+        at(300, "wait")
         PAGES_END = t + 2
     if os.environ.get("DIGICMI_LRTEST"):        # single notes from track 1's key: left/right output each
         at(0, "chord", (0x40, 0x40, 0x40))
@@ -628,6 +635,10 @@ def spin(m, pc, *args, **kw):
                 for k_ in (kit, ek):             # PLAY = FWD.L (2), LOOP = 60 (half way), on both kits' sound
                     uc.mem_write(k_ + 0x20 + 0x14 + 2 * 18, struct.pack(">h", PROBE_PLAY << 8))
                     uc.mem_write(k_ + 0x20 + 0x14 + 2 * 23, struct.pack(">h", PROBE_LOOP << 8))
+                if os.environ.get("DIGICMI_AMPDEC") is not None:  # AMP decay (kit slot 40: the range table says 41)
+                    dv_ = int(os.environ["DIGICMI_AMPDEC"]) << 8
+                    for k_ in (kit, ek):
+                        uc.mem_write(k_ + 0x20 + 0x14 + 2 * 40, struct.pack(">h", dv_))
                 if os.environ.get("DIGICMI_LEN") is not None:     # LEN (slot 22) on both kits and every voice copy
                     lv_ = int(os.environ["DIGICMI_LEN"]) << 8
                     for k_ in (kit, ek):
@@ -1165,6 +1176,8 @@ if state.get("lr"):
             mu = statistics.mean(sm_); x_ = [a - mu for a in sm_]
             best = max(range(60, 800), key=lambda L: sum(x_[i] * x_[i + L] for i in range(0, 4000, 2)) / L ** 0.1)
             print("  pitch %s: period %d samples = %.1f Hz" % (k, best, 48000 / best))
+        if l_ > 0 and r_ > 0:
+            print("  both sides sounding in %s: left/right %.2f" % (k, l_ / r_))
         print("output %s: left %.0f right %.0f (frames %d) -> %s" % (k, l_ / max(n_, 1), r_ / max(n_, 1), n_, side))
 if PAGES_ONLY and state.get("mlog"):
     want = {"track 2 -> WERP, track 1 CMI": [40, 0], "track 2 -> CMI, track 1 CMI": [40, 0],

@@ -16,7 +16,8 @@ early CMI voice did, stereo spread and a time synth that builds a moving wavetab
   machine. Hold FUNC and the track keys turn blue.
 - **One sample, eight voices.** Notes from track 1's trigs (and chords) and from MIDI on any track's channel
   play the sample pitched from **C3 (MIDI 60)**, one voice each. Velocity sets volume (the stock curve).
-  When more than eight notes sound, the quietest voice is taken.
+  Each new note from MIDI takes the quietest free voice, so released notes ring on (on their own side, with
+  SPRD) while new ones play; when all eight are busy, the quietest is taken.
 - **Loop controls** after the CMI's: forward, reverse and ping-pong loops between LOOP and the sample's END,
   HOLD or SUSTAIN looping. Both loop points land on the nearest zero crossing, so loops join without a click. Loops play at the note's pitch, so higher notes loop faster, and
   loop points follow knobs, p-locks and LFOs while notes sound.
@@ -87,6 +88,8 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29. The other knobs
 - Needs elekloader's **core** (built with 4.3) and **machine-pages** (1.10).
 - **Conflicts** (same patch sites or sound slots): Digi Poly, dt8poly, DIGISLICER, Digi EQ, Digi Matrix.
 - CMI can only be chosen on track 1 and uses all eight tracks as voices while it is there.
+- Track 1's own sequencer trigs always play on track 1's own voice, so a trig cuts the tail of the previous trig
+  there (chord notes and MIDI notes take other voices).
 - In sample mode the sample plays unpitched on C3 (MIDI 60), as stock; use TUNE to correct a sample recorded at another pitch.
 - TIME's pitch detection suits pitched, steady sounds. Drums, noise, bells and sounds with vibrato or glides can be
   detected an octave out or not at all (then C3 is used); there is no manual root setting.
@@ -110,6 +113,8 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
+- Overlapping notes (0.25): with SPRD 127 and a long AMP decay, a second note played while the first decays sounds
+  on the other side while the first keeps ringing (left/right equal), where 0.24 cut the first note off.
 - SUS (0.24): with END at 75% of the test sample, released notes play on to the sample's end and stop; with END
   at the sample's end they keep looping through the release. HOLD and REV.L loop windows match the snapped points
   on every block.
@@ -122,7 +127,7 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
 - Voice stealing always takes the quietest eligible voice; every voice gets its own note's velocity.
 
 Hardware: builds up to 0.14 were run on the author's Digitakt mk1 during development, and the faults found
-there were fixed in 0.9-0.16. **0.17-0.24 have only been run in digiemu.** The CPU meter's readings in particular are unverified: the
+there were fixed in 0.9-0.16. **0.17-0.25 have only been run in digiemu.** The CPU meter's readings in particular are unverified: the
 emulator doesn't model the timer it reads, so only its drawing has been checked. BLND and SMEAR have not been
 checked by ear, and CPU load with eight time-synth voices has not been measured.
 
@@ -133,7 +138,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.24-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.25-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -162,7 +167,7 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.24`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.25`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

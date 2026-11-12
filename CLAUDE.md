@@ -248,6 +248,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - **V(v) + 0 is the playing sample's PCM pointer** (measured with `DIGICMI_VDUMP`); `zc_snap` uses it instead of SAMP's table entry, which lagged a voice's first blocks (HOLD test saw unsnapped windows there).
 - Loop test fixed for 0.13/0.20/0.23 (loop to END, no LFIN, snapped points computed from the test PCM; `DIGICMI_LEN` sets LEN). Passing: sus with LEN 90 (36 tails played out) and 120 (28 looped on), hold, rev.
 
+## Released tails ring on (0.25)
+
+- Reported on the unit: with SPRD, pressing a new note seemed to pan the existing note to the new side; L and R never overlapped. Cause: `digipoly_route_c`'s live branch took `w = OWNER[v] < 2 ? v : steal(...)`, i.e. track 1's own voice whenever no key held it, so with a long release every new note cut the previous note's tail on voice 0. Now `w = steal(0, fp, 0)`: the quietest voice not holding a key, voice 0 included.
+- Measured (`DIGICMI_OVERLAP=1`, SPRD 127, AMP decay 127 = kit slot 40): note 2 while note 1 decays: 0.24 left 0 / right 626k; 0.25 left 626k / right 626k.
+- Still open: track 1's own sequencer trig always plays on voice 0 (stock), cutting the previous trig's tail there. Moving it to the quietest voice is possible in route_c (as chord copies), but the trig's length/note-off handling for a moved own-trig is untested.
+- AMP kit slots, by the PAN finding: attack 38, hold 39, decay 40, overdrive 41, delay send 42, reverb send 43, pan 44, volume 45 (the range table's last field is 1 higher for these).
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

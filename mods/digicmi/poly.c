@@ -298,7 +298,10 @@ void digipoly_route_c(char *m, u32 busy, const char *fp)
     if (M(m, M_ON) == 1) {
         w = holder(v, n);                   /* the same note again: the same voice */
         if (w < 0)
-            w = OWNER[v] < 2 ? v : steal(1u << v, fp, 0);
+            w = steal(0, fp, 0);            /* digicmi 0.25: the quietest voice not holding a key, the track's own
+                                               included, so a released note's tail rings on (on its own side,
+                                               with SPREAD) instead of being cut by the next note. (Until 0.24:
+                                               the track's own voice whenever no key held it, tail or not.) */
         if (w < 0) {
             M(m, M_ID) = -1;                /* no voice: dropped */
             return;
