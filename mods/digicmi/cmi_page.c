@@ -221,11 +221,14 @@ int digicmi_ts_pos(int v);
 #define SW_OFF   0                               /* poly.c's digipoly_setparam snaps a turn to 0 or 127 */
 #define SW_ON    0x7f00
 
+static int page1_drawn;                         /* a switch was drawn: this frame is page 1 */
+
 /* A toggle drawn in the knob's 17 x 17 place (x + 1 .. x + 17, y .. y + 16; y = 0 is the bottom row). */
 static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t flag)
 {
     int on = ((value >> 8) & 127) >= 96, x0 = x + 2, x1 = x + 16, y0 = y + 5, y1 = y + 11;
     (void)flag;
+    page1_drawn = 1;
     fw_fillrect(bmp, x0 + 1, y0, x1 - 1, y0, 1);                /* a rounded outline */
     fw_fillrect(bmp, x0 + 1, y1, x1 - 1, y1, 1);
     fw_fillrect(bmp, x0, y0 + 1, x0, y1 - 1, 1);
@@ -360,6 +363,40 @@ static void vbox(void *bmp, int k, const char *s, int dotted_frame)
  * last drawn, so the screen that followed - the sample browser, say - was redrawn 30 times a second while
  * notes sounded, and the UI felt sluggish.) */
 static int page2_live;
+static int cmi_live;                            /* the last frame drawn was the CMI's page 1 or 2 */
+static int meter_shown = -2;                    /* the load the title bar shows */
+extern volatile int digicmi_cpu_load;           /* cpumeter.c: the render's peak load, 256ths; -1 not measured */
+
+/* The CPU meter in the title bar: "42%", white on black, in x 90-103 of its rows 1-8 (from the top). That
+ * strip is free in both of the bar's states: the page's own title (black, its text on the left) and the
+ * pattern name with the tempo (the empty left end of the tempo box). A long sample name in the page's title
+ * is cut short there. Glyphs 3 x 5, drawn pixel by pixel, top row first. */
+static const unsigned char glyph[12][5] = {
+    {7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 3, 1, 7}, {5, 5, 7, 1, 1},
+    {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 2, 2}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7},
+    {5, 1, 2, 4, 5},                                    /* 10: % */
+    {0, 0, 7, 0, 0},                                    /* 11: - */
+};
+
+static void put_glyph(void *bmp, int x, int g)
+{
+    int r, c;
+    for (r = 0; r < 5; r++)                             /* rows 2-6 from the top: y 61 down to 57 */
+        for (c = 0; c < 3; c++)
+            if ((glyph[g][r] >> (2 - c)) & 1)
+                fw_fillrect(bmp, x + c, 61 - r, x + c, 61 - r, 0);
+}
+
+static void draw_meter(void *bmp)
+{
+    int load = digicmi_cpu_load, pc = load < 0 ? -1 : load * 100 / 256;
+    pc = pc > 99 ? 99 : pc;
+    meter_shown = load;
+    fw_fillrect(bmp, 90, 55, 103, 62, 1);
+    put_glyph(bmp, 91, pc < 0 ? 11 : pc / 10);
+    put_glyph(bmp, 95, pc < 0 ? 11 : pc % 10);
+    put_glyph(bmp, 99, 10);
+}
 
 void digicmi_page_tick(void *ctrl)
 {
@@ -368,6 +405,8 @@ void digicmi_page_tick(void *ctrl)
     uint32_t vl;
     digicmi_ts_tick();                          /* timesynth.c: the waves, when track 1's sample, STRT or LEN change */
     odd ^= 1;
+    if (cmi_live && ctrl && digicmi_cpu_load != meter_shown)
+        *((unsigned char *)ctrl + 0x20) = 1;    /* a CMI page is up and the meter's value moved (2 a second at most) */
     if (!page2_live || !ctrl) {                 /* page 2 isn't on screen: nothing to animate */
         was = 0;
         return;
@@ -390,6 +429,10 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     int c, endv, loopv, le, looped;
     (void)ctrl;
     page2_live = shown.on;                       /* this frame is page 2, or another screen */
+    cmi_live = shown.on || page1_drawn;
+    page1_drawn = 0;
+    if (cmi_live)
+        draw_meter(bmp);
     if (!shown.on)
         return;
     shown.on = 0;

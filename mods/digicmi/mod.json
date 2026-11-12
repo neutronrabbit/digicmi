@@ -1,6 +1,6 @@
 {
  "id": "digicmi",
- "version": "0.21",
+ "version": "0.22",
  "title": "Digi CMI",
  "category": "Sound",
  "author": "neutronrabbit (fork of Digi Poly 2.1 by gdeo607 / digi1_mods, MIT)",
@@ -14,7 +14,8 @@
   "cmi_page.c",
   "cmi_loop.c",
   "cmi_loop.s",
-  "timesynth.c"
+  "timesynth.c",
+  "cpumeter.c"
  ],
  "requires": [
   "core",
@@ -154,6 +155,16 @@
    "event": "ev_tick",
    "fn": "digicmi_page_tick",
    "order": 40
+  },
+  {
+   "event": "ev_render_in",
+   "fn": "digicmi_cpu_in",
+   "order": 1
+  },
+  {
+   "event": "ev_render_out",
+   "fn": "digicmi_cpu_out",
+   "order": 250
   }
  ],
  "resources": {

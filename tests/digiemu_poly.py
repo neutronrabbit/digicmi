@@ -653,6 +653,11 @@ def spin(m, pc, *args, **kw):
     if LOOPTEST == "live" and state["n"] == LIVE_STEP:   # a knob turned while the chord sounds
         for w in range(8):
             uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + 23), struct.pack(">h", LIVE_LOOP << 8))
+    if "digicmi_cpu_load" in MAP:                 # the CPU meter: what it measured, and a fake value for screenshots
+        cl_ = struct.unpack(">i", uc.mem_read(MAP["digicmi_cpu_load"], 4))[0]
+        state.setdefault("cpu_seen", set()).add(cl_)
+        if os.environ.get("DIGICMI_FAKELOAD"):
+            uc.mem_write(MAP["digicmi_cpu_load"], struct.pack(">i", int(os.environ["DIGICMI_FAKELOAD"])))
     if state.get("lr_on") and "fpos" in MAP:     # the time synth's voice 0: its place among the waves (16.16)
         fp_ = struct.unpack(">i", uc.mem_read(MAP["fpos"], 4))[0]
         state.setdefault("fpos", {}).setdefault(state["lr_on"], []).append(fp_)
@@ -1038,6 +1043,8 @@ if "digicmi_steal" in MAP:
     if not st:
         fails.append("no steal ran, so the quietest-voice rule was not exercised")
 
+if state.get("cpu_seen"):
+    print("cpu meter values seen:", sorted(state["cpu_seen"])[:12])
 if state.get("frames"):
     for k, (n_, steps_) in state["frames"].items():
         print("frames %s: %d in %d steps" % (k, n_, steps_))

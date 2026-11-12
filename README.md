@@ -27,6 +27,8 @@ early CMI voice did, stereo spread and a time synth that builds a moving wavetab
   the same loop layout as the sample (PLAY and LOOP). The sample's pitch is detected automatically (or set with
   ROOT), so each cut is exactly one cycle and the root plays at the sample's own pitch, as in sample mode.
 - A Digitakt II-style **waveform page** (page 2) with dotted markers and a playhead arrow for each sounding note.
+- A small **CPU meter** in the title bar of both CMI pages: the audio engine's peak load over the last half
+  second (all tracks and effects, not just CMI), e.g. "42%". Near 100% the audio would break up.
 
 ## Controls
 
@@ -90,6 +92,9 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29, ROOT 30. The ot
 - SMEAR shares its stored value with LMOD, and TIME with the knob that was LFIN before 0.20, so a value set in
   one engine carries over when you switch ENG.
 - TIME scales its waves to near full level, so a quiet sample plays louder in TIME than in SMPL.
+- The CPU meter times each audio block with the unit's RTOS timer (read only). It shows the audio load, not the
+  UI's; a long sample name in the page's own title is cut short where the meter sits. It reads "--%" when it
+  can't measure (as in the emulator).
 - SMEAR is set per track (from track 1's value) and acts when the knob moves; p-locks and LFOs don't change it per note.
 - Kits saved with CMI load that track as ONESHOT on the stock OS.
 
@@ -108,7 +113,8 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
 - Voice stealing always takes the quietest eligible voice; every voice gets its own note's velocity.
 
 Hardware: builds up to 0.14 were run on the author's Digitakt mk1 during development, and the faults found
-there were fixed in 0.9-0.16. **0.17-0.20 have only been run in digiemu.** BLND and SMEAR have not been
+there were fixed in 0.9-0.16. **0.17-0.22 have only been run in digiemu.** The CPU meter's readings in particular are unverified: the
+emulator doesn't model the timer it reads, so only its drawing has been checked. BLND and SMEAR have not been
 checked by ear, and CPU load with eight time-synth voices has not been measured.
 
 ## Building
@@ -118,7 +124,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.20-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.22-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -147,7 +153,7 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.20`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.22`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

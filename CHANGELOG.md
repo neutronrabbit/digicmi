@@ -1,6 +1,10 @@
 # Changelog
 
-Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.20 only in digiemu.
+Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.22 only in digiemu.
+
+## 0.22 (2026-11-12): CPU meter
+
+Both CMI pages show the audio engine's peak load over the last half second in the title bar ("42%"), timed from the render's entry to its exit with the unit's RTOS timer, read only. Known issue: its readings are untested on hardware; the emulator only checks its drawing ("--%").
 
 ## 0.21 (2026-11-12): lighter on the UI
 

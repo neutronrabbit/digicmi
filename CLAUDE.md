@@ -221,6 +221,12 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Measured (digiemu, `DIGICMI_REDRAWTEST=1`): frames per 400 steps with a looping note held: page 2 53 -> 33; after switching to the TRIG page 2 in both 0.20 and 0.21, so the redraw request only drives the SRC view's own frames: the "redraws leak to other screens" theory is NOT confirmed (screens shown by the SRC view itself, like the sample list, untested). Cause of the sluggishness still unknown; a frame's cost was not measured.
 - A partial screen update (arrows only) would need the firmware's LCD transfer path: not known; ev_draw only draws inside frames the firmware composes.
 
+## CPU meter (0.22)
+
+- `cpumeter.c`: core 4.3's `ev_render_in` (order 1) and `ev_render_out` (order 250), 1500/s at interrupt level, read PIT0's PCNTR (0xFC080004, 16-bit down-counter, PMR 0xFC080002 + 1 per 20 ms RTOS tick; read only). load = (in -> out) / (in -> next in), 256ths; peak over 750 blocks published in `digicmi_cpu_load` (-1 when the counter doesn't move: digiemu doesn't model PIT counters).
+- Drawn by `draw_meter` (cmi_page.c) in the title bar, x 90-103, rows 1-8 from the top (y 55-62): black box, "NN%" in its own 3x5 glyphs, white. That strip is free in both title-bar states (page title; pattern name + tempo box's empty left end). Page 1 is recognised by `switch_draw` running in the frame (`page1_drawn`), page 2 by `lmod_draw`; `cmi_live` = the last frame was one of them. The tick asks for a frame when the published value changes while a CMI page is up (<= 2/s).
+- Checked in digiemu: drawing on page 1 ("--%"), page 2 and the pattern-name bar (`DIGICMI_FAKELOAD=108` -> "42%"). Not checked: the readings on hardware (the user should compare 1 vs 8 voices, RETRO, TIME).
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.
