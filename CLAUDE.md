@@ -269,6 +269,15 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - 0.27's rule: switch off only after phase 0 and |level| < 0x2000 (~-108 dB) for 64 blocks running (the floor is ~-135 dB). Measured: six released voices off within 600 steps; overlap, sus (LEN 90 and 120), hold pass.
 - **The AMP envelope is not in kit slots 38-40**: setting slots 25-35 to 127 changes it (phase 3 appears, slow attack, holds at -9 dB); 36-43 and 1-16 don't. Which of 25-35 is attack/hold/decay: being narrowed (`DIGICMI_SETSLOT`, `DIGICMI_LONGHOLD`). The "AMP kit slots" list under 0.25 above is wrong except pan 44 / volume 45.
 
+## fw_amp_env's level is NOT the audio's level (0.28)
+
+- **Measured (digiemu, `DIGICMI_LONGHOLD=1`):** a held looping note's output (SSI) stays constant (~470k) for 1200 steps while fw_amp_env[3v+1] falls -35, -71, -106, -135 dB; after release the output fades (266k, 136k, 41k, 4k at +40/+80/+160/+320 steps) while that level stays at -135 dB. So the level is not the AMP envelope's.
+- It follows kit slots **29 (attack), 30 (decay: 127 = stays full), 31 (sustain: 127 = stays full), 32 (release: 127 = stays after note-off), 35 (a delay: phase 3)**: an ADSR, the filter envelope's shape (`DIGICMI_SETSLOT=slot:value,...`). Slots 36-43 and 1-16 don't move it. The user also reported release behaving better with AMP HOLD at 0.
+- The phase (2 attack, 1 held, 0 released) still follows the gate (key down / trig length).
+- **Everything keyed to that level is unreliable**: `digicmi_voice_pos` (arrows hide when it is low), `digicmi_steal` (quietest voice), and 0.26-0.27's voice switch-off, which cut audible notes on the unit (dead stops) and is removed in 0.28. cmi_loop.c in 0.28 = 0.25's plus a comment. Earlier notes calling it "the AMP envelope level" (0.1, 0.16, 0.25, 0.26) are wrong on that point.
+- **Not found yet: the real AMP envelope / a voice's audible level.** Scanned 0x41980000-0x419b0000, 0x80000000-0x80010000, 0x43990000-0x439b0000, 0x4217a000-0x4217e000 for 16/32-bit values steady while held and falling with the output after release: none (only counters that start running at release, e.g. 0x4199f240 + 20n). Needs disassembly of the render's amp stage (Ghidra) rather than scanning.
+- Still open from the unit: after playing, load 94% vs 86% at boot and UI lag; piled-up silent voices cost only +1% instructions in digiemu. Unresolved without a reliable level to switch voices off by.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

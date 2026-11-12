@@ -64,7 +64,7 @@ from unicorn import UC_HOOK_CODE
 from unicorn.m68k_const import (UC_M68K_REG_A2, UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_A6, UC_M68K_REG_A7,
                                  UC_M68K_REG_D0, UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D4)
 import emu.gui as G
-if os.environ.get("DIGICMI_LRTEST") or os.environ.get("DIGICMI_OVERLAP"):   # the SSI's output frames, left/right
+if os.environ.get("DIGICMI_LRTEST") or os.environ.get("DIGICMI_OVERLAP") or os.environ.get("DIGICMI_LONGHOLD"):   # the SSI's output frames
     import emu.ssi as _ssi
     def _lr_sink(data):
         on = state.get("lr_on") if "state" in globals() else None
@@ -187,10 +187,16 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
         at(0, "chord", (0x40, 0x40, 0x40))
         at(1, "press", 24)
         for k_ in range(6):
-            at(200, "voices", "held %d steps" % (200 * (k_ + 1)))
+            at(170, "lr", "out held %d" % (200 * (k_ + 1))); at(30, "lr", None)
+            at(0, "voices", "held %d steps" % (200 * (k_ + 1)))
+        at(0, "memsnap2", "held a"); at(30, "memsnap2", "held b")
         at(1, "release", 24)
         for d_ in (2, 5, 10, 20, 40, 80, 160, 320):
             at(d_, "voices", "released, +%d" % d_)
+            if d_ >= 40:
+                at(0, "memsnap2", "rel +%d" % d_)
+            if d_ >= 40:
+                at(0, "lr", "out released +%d" % d_); at(20, "lr", None)
         PAGES_END = t + 2
     if os.environ.get("DIGICMI_PILEUP"):        # six notes played and released, then nothing: which voices stay on
         at(0, "chord", (0x40, 0x40, 0x40))
@@ -623,6 +629,9 @@ def spin(m, pc, *args, **kw):
             state["holdv0"] = act[1]
             env0 = struct.unpack(">ii", uc.mem_read(AMP, 8))
             log.append("holdv0 %d at step %d: voice 0 AMP phase %d level %d" % (act[1], state["n"], env0[0], env0[1]))
+        elif k == "memsnap2":                    # snapshots of RAM, to find what follows the audio's level
+            regs_ = [(0x41980000, 0x30000), (0x80000000, 0x10000), (0x43990000, 0x20000), (0x4217a000, 0x4000)]
+            state.setdefault("snaps2", []).append((act[1], [(b_, bytes(uc.mem_read(b_, n_))) for b_, n_ in regs_]))
         elif k == "voices":
             on_ = []
             for v_ in range(8):
@@ -1228,6 +1237,45 @@ if os.environ.get("DIGICMI_SLURTEST"):
     for r in state.get("vr", []):
         if r[6] and r[11]:                        # a CMI voice's first block: where its note starts
             print("note start: step %d voice %d window %d..%d PLAY %d" % (r[0], r[1], r[2], r[3], r[4]))
+if state.get("snaps2"):
+    sn_ = state["snaps2"]; names_ = [n for n, _ in sn_]
+    want_ = [1.0, 1.0, 266003 / 470000, 136321 / 470000, 41000 / 470000, 4249 / 470000]   # the audio, relative to held
+    hits_ = []
+    for ri_ in range(len(sn_[0][1])):
+        base_ = sn_[0][1][ri_][0]; n_ = len(sn_[0][1][ri_][1])
+        for o_ in range(0, n_ - 3, 2):
+            vals_ = [struct.unpack(">i", sn_[k_][1][ri_][1][o_:o_ + 4])[0] for k_ in range(len(sn_))]
+            if abs(vals_[1] - vals_[0]) > max(abs(vals_[0]) // 64, 2):
+                continue                                # not steady while held
+            d_ = [vals_[k_ + 1] - vals_[k_] for k_ in range(1, 5)]
+            if (all(x > 0 for x in d_) or all(x < 0 for x in d_)) and abs(vals_[5] - vals_[1]) > 1 << 12:
+                hits_.append((base_ + o_, 0.0, vals_))
+    for ri_ in range(len(sn_[0][1])):                 # 16-bit values too: steady while held, then falling to < 20%
+        base_ = sn_[0][1][ri_][0]; n_ = len(sn_[0][1][ri_][1])
+        for o_ in range(0, n_ - 1, 2):
+            v16 = [struct.unpack(">h", sn_[k_][1][ri_][1][o_:o_ + 2])[0] for k_ in range(len(sn_))]
+            m_ = [abs(x) for x in v16]
+            if m_[0] >= 256 and m_[0] == m_[1] and all(m_[k_ + 1] < m_[k_] for k_ in range(1, 5)) and m_[5] * 5 < m_[0]:
+                hits_.append((base_ + o_, 16.0, v16))
+    for ri_ in range(len(sn_[0][1])):                 # 32-bit, falling in magnitude to < 20%
+        base_ = sn_[0][1][ri_][0]; n_ = len(sn_[0][1][ri_][1])
+        for o_ in range(0, n_ - 3, 2):
+            v32 = [struct.unpack(">i", sn_[k_][1][ri_][1][o_:o_ + 4])[0] for k_ in range(len(sn_))]
+            m_ = [abs(x) for x in v32]
+            if m_[0] >= 1 << 12 and abs(m_[0] - m_[1]) <= m_[0] >> 5 and all(m_[k_ + 1] < m_[k_] for k_ in range(1, 5)) and m_[5] * 5 < m_[0]:
+                hits_.append((base_ + o_, 32.0, v32))
+    r0_ = sn_[0][1][0]                                # around fw_amp_env (voice 0's three words at AMP)
+    for off_ in range(-0x180, 0x200, 12):
+        ad_ = AMP + off_
+        row_ = []
+        for k_ in (1, 3, 5):
+            d_ = sn_[k_][1][0][1]; o_ = ad_ - r0_[0]
+            row_.append(struct.unpack(">iii", d_[o_:o_ + 12]))
+        if any(row_[0] != r for r in row_[1:]):
+            print("   near 0x%08x (AMP%+d): held %s  rel+80 %s  rel+320 %s" % (ad_, off_, row_[0], row_[1], row_[2]))
+    print("memory that follows the audio's fade (%d found):" % len(hits_))
+    for ad_, pw_, vals_ in hits_[:60]:
+        print("   0x%08x power %.1f %s" % (ad_, pw_, vals_))
 if state.get("frames"):
     for k, (n_, steps_) in state["frames"].items():
         print("frames %s: %d in %d steps" % (k, n_, steps_))
@@ -1244,7 +1292,7 @@ if state.get("lr"):
         print("  blocks %s: %d" % (k, sum(tb_)))
         side = "LEFT" if l_ > 2 * r_ else "RIGHT" if r_ > 2 * l_ else "centre"
         sm_ = state.get("lrs", {}).get(k, [])[4000:12000]
-        if len(sm_) > 2000 and any(sm_):
+        if len(sm_) > 5000 and any(sm_):
             import statistics
             mu = statistics.mean(sm_); x_ = [a - mu for a in sm_]
             best = max(range(60, 800), key=lambda L: sum(x_[i] * x_[i + L] for i in range(0, 4000, 2)) / L ** 0.1)

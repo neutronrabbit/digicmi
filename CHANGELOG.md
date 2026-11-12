@@ -2,9 +2,13 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.28 (2026-11-12): voice switch-off withdrawn
+
+0.26 and 0.27 switched a released voice off when an envelope value had faded, but that value follows the filter envelope's settings, not the sound's level, so notes that were still sounding stopped dead. The switch-off is removed; the player is 0.25's again. Known issue: released notes keep their voices running after they fade, which raised the audio load on the unit; arrows and voice stealing use the same unreliable value.
+
 ## 0.27 (2026-11-12): faded voices: no dead stops
 
-0.26 ended a released voice as it passed -72 dB and left its "end reached" flag set, so on the unit released notes stopped dead, and a later note on a reused voice was cut when it stopped looping. A voice is now switched off only after its envelope has rested at its floor (about -108 dB) for 64 blocks, and the flag is cleared when the next note starts. Known issue: not yet confirmed on the unit.
+0.26 ended a released voice as it passed -72 dB and left its "end reached" flag set, so on the unit released notes stopped dead, and a later note on a reused voice was cut when it stopped looping. A voice is now switched off only after its envelope has rested at its floor (about -108 dB) for 64 blocks, and the flag is cleared when the next note starts. Withdrawn: never released; see 0.28.
 
 ## 0.26 (2026-11-12): faded voices switch off
 

@@ -88,6 +88,9 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29. The other knobs
 - Needs elekloader's **core** (built with 4.3) and **machine-pages** (1.10).
 - **Conflicts** (same patch sites or sound slots): Digi Poly, dt8poly, DIGISLICER, Digi EQ, Digi Matrix.
 - CMI can only be chosen on track 1 and uses all eight tracks as voices while it is there.
+- Released notes keep their voices running after they fade (the mod has no reliable reading of a voice's level
+  yet), which on the unit raised the audio load after playing. The playhead arrows and the choice of the
+  "quietest" voice use the same unreliable reading.
 - Track 1's own sequencer trigs always play on track 1's own voice, so a trig cuts the tail of the previous trig
   there (chord notes and MIDI notes take other voices).
 - In sample mode the sample plays unpitched on C3 (MIDI 60), as stock; use TUNE to correct a sample recorded at another pitch.
@@ -113,10 +116,9 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
-- Voices off when faded (0.27): released voices ring down to about -108 dB and rest there for 64 blocks before
-  they are switched off; a note on a reused voice plays its SUS tail (loop tests pass with reused voices).
-- Voices off when faded (0.26): six notes played and released with a long decay: all six voices stayed on for
-  good in 0.25 (the envelope settles near -135 dB, never 0); in 0.26 none are on 450 steps later.
+- 0.26-0.27 switched faded voices off; withdrawn in 0.28. The envelope value they read is not the audio's level
+  (it follows the filter envelope's settings): in the emulator the output stays constant through a held note
+  while that value falls to -135 dB. On the unit it cut notes that were still sounding.
 - Overlapping notes (0.25): with SPRD 127 and a long AMP decay, a second note played while the first decays sounds
   on the other side while the first keeps ringing (left/right equal), where 0.24 cut the first note off.
 - SUS (0.24): with END at 75% of the test sample, released notes play on to the sample's end and stop; with END
@@ -142,7 +144,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.27-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.28-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -171,7 +173,7 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.27`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.28`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.
