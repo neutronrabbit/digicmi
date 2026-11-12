@@ -41,6 +41,54 @@ typedef unsigned int u32;
 #define MIN_LOOP   320                                       /* samples: the player keeps 141 at each end */
 #define FULL       0x7800                                    /* 120.0: STRT, LEN and LOOP's scale */
 
+#ifdef OS154
+#define SMP_TAB    0x4031a3a0u                               /* sample slots, 16 bytes each: PCM, 0, length, ratio */
+#else
+#define SMP_TAB    0x403193a0u
+#endif
+#define ZC_REACH   256                                       /* samples either side searched for a zero crossing */
+
+/* The loop's points on zero crossings (0.23): the nearest upward crossing (one sample < 0, the next >= 0) to
+ * where LOOP and END put them, within ZC_REACH, so both ends of the loop meet the wave going the same way and
+ * the join doesn't click. Kept per voice and searched again only when a point, the sample or its length move
+ * (LOOP under an LFO searches each block it moves: ZC_REACH x 2 reads at most). None in reach: as it was. */
+static const short *zc_pcm[8];
+static int zc_in[8][2], zc_out[8][2];
+
+static int zc_near(const short *pcm, int len, int pos, int lo, int hi)
+{
+    int d, i;
+    lo = lo < 1 ? 1 : lo;
+    hi = hi > len - 1 ? len - 1 : hi;
+    for (d = 0; d <= ZC_REACH; d++) {
+        i = pos + d;
+        if (i >= lo && i <= hi && pcm[i - 1] < 0 && pcm[i] >= 0)
+            return i;
+        i = pos - d;
+        if (d && i >= lo && i <= hi && pcm[i - 1] < 0 && pcm[i] >= 0)
+            return i;
+    }
+    return pos;
+}
+
+static void zc_snap(int v, int *ls, int *le)
+{
+    const volatile u32 *e = (const volatile u32 *)(SMP_TAB + 16u * (u32)((PARAM(v, 20) >> 8) & 255));
+    const short *pcm = (const short *)e[0];
+    int len = (int)SLEN(v);
+    if ((u32)pcm < 0x40000000u || (int)e[2] != len || len < 1024)
+        return;                                              /* not the voice's sample as far as we can tell */
+    if (pcm != zc_pcm[v] || *ls != zc_in[v][0] || *le != zc_in[v][1]) {
+        zc_pcm[v] = pcm;
+        zc_in[v][0] = *ls;
+        zc_in[v][1] = *le;
+        zc_out[v][1] = zc_near(pcm, len, *le, *ls + MIN_LOOP, len - 1);
+        zc_out[v][0] = zc_near(pcm, len, *ls, 1, zc_out[v][1] - MIN_LOOP);
+    }
+    *ls = zc_out[v][0];
+    *le = zc_out[v][1];
+}
+
 static signed char dir[8];
 static unsigned char released[8], have[8], eff[8];
 static int last[8];
@@ -91,6 +139,8 @@ int digicmi_play(int v, int play, int *win)
     int le = llen ? ls + (int)((len / 128) * (u32)llen + ((len % 128) * (u32)llen) / 128) : se;
     if (le > se)
         le = se;
+    if (le - ls >= MIN_LOOP)
+        zc_snap(v, &ls, &le);                                /* 0.23: both on zero crossings */
     if (le - ls < MIN_LOOP) {                                /* too short for the player: as short as it takes */
         le = ls + MIN_LOOP;
         if (le > se) {
@@ -196,13 +246,19 @@ static int ts_loop_frame(int v)
  * two samples of the 48 kHz sample, one 24 kHz sample: at the root a value lasts two output samples, higher
  * notes less, and from an octave up none. The ratio is the playhead's own move this block (TUNE, bends and LFOs
  * in), in 16.16 per output sample. */
-#define HOLD_STEP  0x20000                                   /* two samples of the sample */
+/* RETRO (0.23, a dial: slot 50, 0-127 in six steps): 0 off (16 bit 48 kHz), 1 16 bit 44.1 kHz, 2 8 bit 32 kHz,
+ * 3 8 bit 24 kHz (0.14-0.22's RETRO), 4 8 bit 16 kHz, 5 8 bit 8 kHz. A step is 48 kHz / rate samples of the
+ * sample, 16.16. (A kit saved with 0.14-0.22's switch on holds 127: the dial's last step, 8 kHz.) */
+#define RETRO_MODE(v) ((((PARAM(v, 50) >> 8) & 127) * 6) >> 7)
+static const u32 hold_steps[6] = {0x10000, 71332, 98304, 131072, 196608, 393216};
+static u32 HOLD_STEP;
 static int32_t hold_val[8];
 static u32 hold_phase[8], hold_inc[8];
 static int hold_last[8];
 
-static void retro_rate(int v, int32_t *b)
+static void retro_rate(int v, int32_t *b, int mode)
 {
+    HOLD_STEP = hold_steps[mode];
     int pos = POS(v), adv = pos - hold_last[v], i;
     if (adv < 0)
         adv = -adv;
@@ -231,15 +287,15 @@ void digicmi_render(int32_t *blocks)
             hold_last[v] = POS(v);
             continue;
         }
-        if (((PARAM(v, 50) >> 8) & 127) < 96)
+        if (!RETRO_MODE(v))
             hold_last[v] = POS(v);                           /* RETRO off: keep the playhead's place */
         if (((PARAM(v, 51) >> 8) & 127) >= 96)              /* ENG = TIME: the time synth (timesynth.c) */
             ts_voice(v, b, POS(v), (PARAM(v, 18) >> 8) & 7, ((PARAM(v, 49) >> 8) & 127) * 120 / 127,
                      (PARAM(v, 46) >> 8) & 127, ts_loop_frame(v), GAIN(v), (int)((fw_voice_start >> v) & 1));
-        if (((PARAM(v, 50) >> 8) & 127) >= 96) {             /* RETRO: 24 kHz at the note's clock, 8 bits */
-            int g = GAIN(v), step;
-            retro_rate(v, b);
-            if (g <= 0)
+        if (RETRO_MODE(v)) {                                 /* RETRO: its rate at the note's clock; 8 bits from 2 */
+            int g = GAIN(v), step, mode = RETRO_MODE(v);
+            retro_rate(v, b, mode);
+            if (mode < 2 || g <= 0)
                 continue;
             step = (int)((((u32)g >> 8) * 207u) >> 7);
             if (step <= 0)

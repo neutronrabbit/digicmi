@@ -1,6 +1,10 @@
 # Changelog
 
-Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.22 only in digiemu.
+Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.23 only in digiemu.
+
+## 0.23 (2026-11-12): zero-crossing loops, RETRO dial, no ROOT
+
+Loop start and end snap to the nearest upward zero crossing. RETRO is a dial: off (16 bit 48 kHz), 16 bit 44.1 kHz, and 8 bit 32, 24, 16 and 8 kHz. The ROOT selector is gone (the time synth always detects the pitch). SMEAR's box reads S0-S127 like BLND's. The CPU meter hides while a knob's pop-up is up. Known issue: a project saved with the old RETRO switch on opens at 8 bit 8 kHz.
 
 ## 0.22 (2026-11-12): CPU meter
 

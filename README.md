@@ -18,14 +18,15 @@ early CMI voice did, stereo spread and a time synth that builds a moving wavetab
   play the sample pitched from **C3 (MIDI 60)**, one voice each. Velocity sets volume (the stock curve).
   When more than eight notes sound, the quietest voice is taken.
 - **Loop controls** after the CMI's: forward, reverse and ping-pong loops between LOOP and the sample's END,
-  HOLD or SUSTAIN looping. Loops play at the note's pitch, so higher notes loop faster, and
+  HOLD or SUSTAIN looping. Both loop points land on the nearest zero crossing, so loops join without a click. Loops play at the note's pitch, so higher notes loop faster, and
   loop points follow knobs, p-locks and LFOs while notes sound.
-- **RETRO**: 8 bits at 24 kHz with the CMI Series I's rate character (each voice's clock follows its pitch).
+- **RETRO**: a dial through 16 bit 48 kHz (off), 16 bit 44.1 kHz, and 8 bit at 32, 24, 16 or 8 kHz, with the
+  CMI Series I's rate character (each voice's clock follows its pitch).
 - **SPRD**: stereo spread; at 127 notes alternate hard left and hard right.
 - **ENG = TIME**: a time-domain wavetable synth. Sixteen single cycles are cut from the sample between STRT
   and END and played in turn while the note sounds, stepped or crossfaded, optionally smeared together, with
-  the same loop layout as the sample (PLAY and LOOP). The sample's pitch is detected automatically (or set with
-  ROOT), so each cut is exactly one cycle and the root plays at the sample's own pitch, as in sample mode.
+  the same loop layout as the sample (PLAY and LOOP). The sample's pitch is detected automatically, so each cut
+  is exactly one cycle and the root plays at the sample's own pitch, as in sample mode.
 - A Digitakt II-style **waveform page** (page 2) with dotted markers and a playhead arrow for each sounding note.
 - A small **CPU meter** in the title bar of both CMI pages: the audio engine's peak load over the last half
   second (all tracks and effects, not just CMI), e.g. "42%". Near 100% the audio would break up.
@@ -37,11 +38,10 @@ Page 1 (SRC):
 | Knob | Name | What it does |
 |---|---|---|
 | A | TUNE | Pitch, as ONESHOT |
-| B | RETRO | Switch: off, or 8-bit 24 kHz with CMI-style rate |
+| B | RETRO | Dial: OFF (16 bit 48 kHz), 16/44 (16 bit 44.1 kHz), 8/32, 8/24, 8/16, 8/8 (8 bit at 32-8 kHz), each with CMI-style rate |
 | C | ENG | Switch: SMPL (the sample) or TIME (the time synth) |
 | D | SAMP | Sample slot |
 | E | SPRD | Stereo spread: 0 centred, 127 alternate notes hard left / hard right |
-| F | ROOT | Time synth only: AUTO (default) finds the sample's pitch, or set the note it was recorded at. The pop-up shows what AUTO found ("AUTO G2"; "AUTO (NONE)" when it finds none and uses C3) |
 | H | LEV | Level |
 
 Page 2 (press SRC again), with ENG = SMPL:
@@ -61,13 +61,13 @@ Page 2 with ENG = TIME:
 |---|---|---|
 | A | PLAY | As for the sample, over the 16 waves: FWD and REV play through once; FWD.L plays first to last, then loops from LOOP's wave to the last; REV.L loops from the last down to LOOP's; P plays first to last, then back and forth between the last and LOOP's |
 | B | BLND | 0 steps from wave to wave (CMI segments); 127 crossfades all the way |
-| C | SMEAR | Mixes each wave with its neighbours, up to all of them; 0 off (shares LMOD's value) |
+| C | SMEAR | Mixes each wave with its neighbours, up to all of them; 0 off; shown as S0-S127 (shares LMOD's value) |
 | D | TIME | Time of one pass from the first wave to the last, 0.05 s to about 13 s, shown in seconds |
 | E, F | STRT, LEN | The part of the sample the waves are cut from |
 | G | LOOP | Where the loop starts, between STRT and END (shown on the waveform) |
 | H | LEV | Level |
 
-CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29, ROOT 30. The other knobs keep ONESHOT's CCs.
+CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29. The other knobs keep ONESHOT's CCs.
 
 ## Usage
 
@@ -78,7 +78,7 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29, ROOT 30. The ot
    LMOD SUS loops only while a key is held.
 4. Back on page 1, turn RETRO on for the CMI's 8-bit grit, or SPRD up to spread notes across the stereo field.
 5. For the time synth, set ENG to TIME, choose the region with STRT/LEN, the speed with TIME and the looping
-   with PLAY and LOOP, and shape the movement with BLND and SMEAR. If the pitch sounds wrong, set ROOT on page 1.
+   with PLAY and LOOP, and shape the movement with BLND and SMEAR.
 
 ## Compatibility and limitations
 
@@ -88,11 +88,14 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29, ROOT 30. The ot
 - CMI can only be chosen on track 1 and uses all eight tracks as voices while it is there.
 - In sample mode the sample plays unpitched on C3 (MIDI 60), as stock; use TUNE to correct a sample recorded at another pitch.
 - TIME's pitch detection suits pitched, steady sounds. Drums, noise, bells and sounds with vibrato or glides can be
-  detected an octave out or not at all (then C3 is used): set ROOT (page 1) by hand for those.
+  detected an octave out or not at all (then C3 is used); there is no manual root setting.
 - SMEAR shares its stored value with LMOD, and TIME with the knob that was LFIN before 0.20, so a value set in
   one engine carries over when you switch ENG.
 - TIME scales its waves to near full level, so a quiet sample plays louder in TIME than in SMPL.
-- The CPU meter times each audio block with the unit's RTOS timer (read only). It shows the audio load, not the
+- Loop points snap to a zero crossing within 256 samples of where LOOP and END put them; in silence or DC they
+  stay where they are.
+- Projects saved with 0.14-0.22's RETRO switch on open with the dial at its last step, 8 bit 8 kHz.
+- The CPU meter hides while a knob's pop-up fills the title bar. It times each audio block with the unit's RTOS timer (read only). It shows the audio load, not the
   UI's; a long sample name in the page's own title is cut short where the meter sits. It reads "--%" when it
   can't measure (as in the emulator).
 - SMEAR is set per track (from track 1's value) and acts when the knob moves; p-locks and LFOs don't change it per note.
@@ -106,6 +109,8 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
+- Zero-crossing loops (0.23): on the 440 Hz test sine, LOOP halfway and END at the sample's end gave the window
+  4799-9600; snapped it is 4800-9491, both upward zero crossings.
 - TIME loops (0.20): with LOOP halfway (wave 7.5), FWD.L jumps back to it after the last wave, REV.L from it to
   the last, and P bounces between it and the last.
 - TIME pitch detection (0.19): a 440 Hz sine and a 196 Hz saw are found and play at 440.4 / 195.9 Hz on MIDI 60;
@@ -113,7 +118,7 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
 - Voice stealing always takes the quietest eligible voice; every voice gets its own note's velocity.
 
 Hardware: builds up to 0.14 were run on the author's Digitakt mk1 during development, and the faults found
-there were fixed in 0.9-0.16. **0.17-0.22 have only been run in digiemu.** The CPU meter's readings in particular are unverified: the
+there were fixed in 0.9-0.16. **0.17-0.23 have only been run in digiemu.** The CPU meter's readings in particular are unverified: the
 emulator doesn't model the timer it reads, so only its drawing has been checked. BLND and SMEAR have not been
 checked by ear, and CPU load with eight time-synth voices has not been measured.
 
@@ -124,7 +129,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.22-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.23-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -147,13 +152,13 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 | | |
 |---|---|
 | ![Machine list with CMI selected](media/01-machine-menu.png) | ![Page 1](media/02-page1.png) |
-| Machine list, CMI selected on track 1 (0.10; unchanged since) | Page 1: TUNE, RETRO, ENG, SAMP / SPRD, ROOT, LEV (0.20) |
+| Machine list, CMI selected on track 1 (0.10; unchanged since) | Page 1: TUNE, RETRO (a dial), ENG, SAMP / SPRD, LEV; the title bar's CPU meter reads "--%" in the emulator (0.23) |
 | ![Page 2, sample](media/03-page2-sample.png) | ![Page 2, time synth](media/04-page2-time.png) |
 | Page 2, FWD.L loop, a note's playhead arrow (0.20) | Page 2 with ENG = TIME on a 196 Hz saw: BLND, SMEAR, TIME, the 16 waves' places and LOOP (0.20) |
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.22`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.23`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

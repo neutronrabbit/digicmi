@@ -339,17 +339,21 @@ static int owner_of(int w, const unsigned char *kit)       /* the track whose so
 
 /* replaces 0x400771e8 (value, voice, slot): the stock write, then the same value on every voice that is
  * playing that track's sound */
+volatile int digicmi_param_moved;               /* cmi_page.c: a parameter was set (a knob's pop-up is up) */
+
 void digipoly_setparam(int value, int voice, int slot)
 {
     const unsigned char *kit = ENGINE_KIT;
     u32 own;
     int w;
+    if ((unsigned)voice < 8)
+        digicmi_param_moved = 1;
     if (voice == 16) {
         PARAMS[432 + slot] = value;
         return;
     }
-    if ((slot == 50 || slot == 51) && (unsigned)voice < 8 && kit && kit[0x9e + voice * 0xa2] == POLY) {
-        /* digicmi: CMI's 8BIT and ENG are switches: a turn up is on (127), down off (0), at once */
+    if (slot == 51 && (unsigned)voice < 8 && kit && kit[0x9e + voice * 0xa2] == POLY) {
+        /* digicmi: CMI's ENG is a switch: a turn up is on (127), down off (0), at once (RETRO was one until 0.23) */
         int prev = PARAMS[53 * voice + 8 + slot];
         unsigned char *ui = UI_KIT;
         value = value > prev ? 0x7f00 : value < prev ? 0 : prev;

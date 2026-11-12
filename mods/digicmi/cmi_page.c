@@ -1,6 +1,7 @@
 /* digicmi: the CMI machine's two SRC pages (machine-pages 1.4+, cm_ui_v33).
  *
- * Page 1 "CMI":       A TUNE, B RETRO (switch), C ENG (switch), D SAMP / E SPRD, F ROOT, G blank, H LEV.
+ * Page 1 "CMI":       A TUNE, B RETRO (a dial: off, 16/44.1, 8/32, 8/24, 8/16, 8/8), C ENG (switch), D SAMP /
+ *                     E SPRD, F-G blank, H LEV.
  * Page 2 "CMI LOOP":  drawn here in the Digitakt II's waveform-page style (digicmi_wave_draw): value boxes
  *                     along the top, the sample's waveform with dotted STRT, END and loop marks, labels along
  *                     the bottom. ENG = SMPL: A PLAY, (B empty), C LMOD, (D empty) / E STRT, F LEN, G LOOP, H LEV.
@@ -12,7 +13,6 @@
  *   (LLEN, extra 8 / slot 46: on no page since 0.13; the loop runs from LOOP to END)
  *   LMOD  (with ENG = TIME: SMEAR, timesynth.c) HOLD (loops on after release) or SUS (loops while held, then plays on to the end, or the start)
  *   TIME  (page 2 D, TIME only; was LFIN, the fine loop start, until 0.19)
- *   ROOT  (page 1 F, TIME only) the sample's pitch: AUTO (detected) or a note
  *   RETRO a switch: the sample as a CMI Series I voice plays it: 8 bits at 24 kHz, its clock following the
  *         note's pitch (cmi_loop.c, digicmi_render)
  *   ENG   a switch: SMPL, or TIME (the time synth, timesynth.c: single cycles cut from the sample, played in turn)
@@ -25,7 +25,6 @@
 #define EX_LLEN 8
 #define EX_LMOD 9
 #define EX_LFIN 11                              /* slot 49: TIME (the time synth's) since 0.20; LFIN before */
-#define EX_ROOT 14                              /* slot 52: ROOT (the time synth's) since 0.20 */
 #define EX_8BIT 12
 #define EX_ENG  13
 #define EX_SPRD 10
@@ -92,45 +91,6 @@ static int32_t fmt_sprd(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
-int digicmi_ts_root(int *is_auto, int *found);     /* timesynth.c: the root note in use */
-
-/* A MIDI note as Elektron names it (C3 = 60): C, C#, ... and the octave */
-static char *put_note(char *b, int n)
-{
-    static const char nm[12][3] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    b = put_s(b, nm[n % 12]);
-    return put_u(b, (unsigned)(n / 12 - 2));
-}
-
-/* Page 1 F: the time synth's ROOT (slot 52): 0 AUTO (with the note found), else MIDI note 23 + value. A value
- * with a low byte (Digi Poly's marker, 0x4b53, in kits from before 0.20) is AUTO. */
-static int root_note_of(int32_t v)
-{
-    v &= 0xffff;
-    if (v & 0xff)
-        return 0;
-    v = (v >> 8) & 127;
-    return v ? (v + 23 > 108 ? 108 : v + 23) : 0;
-}
-
-static int32_t fmt_root(char *buf, int32_t v, int32_t ctx, int32_t m)
-{
-    int au, fd, n = root_note_of(v);
-    (void)m;
-    if (n) {
-        put_note(buf, n);
-        return 1;
-    }
-    n = digicmi_ts_root(&au, &fd);
-    if (!ctx || !time_mode())
-        put_s(buf, "AUTO");
-    else if (fd)
-        put_note(put_s(buf, "AUTO "), n);      /* "AUTO G#3": 8 */
-    else
-        put_s(buf, "AUTO (NONE)");             /* no clear pitch: C3 */
-    return 1;
-}
-
 static int32_t fmt_num(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
     (void)ctx; (void)m;
@@ -138,10 +98,15 @@ static int32_t fmt_num(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
+/* RETRO, a dial since 0.23 (cmi_loop.c): six steps over 0-127 */
 static int32_t fmt_retro(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
+    static const char *const s[6] = {"OFF", "16/44", "8/32", "8/24", "8/16", "8/8"};
+    static const char *const l[6] = {"OFF 16BIT 48K", "16BIT 44.1KHZ", "8BIT 32KHZ", "8BIT 24KHZ", "8BIT 16KHZ",
+                                     "8BIT 8KHZ"};          /* <= 15: pop[16] */
+    int k = (((v >> 8) & 127) * 6) >> 7;
     (void)m;
-    put_s(buf, ((v >> 8) & 127) < 96 ? "OFF" : (ctx ? "8-BIT 24KHZ" : "ON"));
+    put_s(buf, ctx ? l[k] : s[k]);
     return 1;
 }
 
@@ -387,11 +352,20 @@ static void put_glyph(void *bmp, int x, int g)
                 fw_fillrect(bmp, x + c, 61 - r, x + c, 61 - r, 0);
 }
 
+/* A knob's pop-up ("Retro=8BIT 24KHZ") fills the title bar, the meter's strip included: the meter stays away
+ * for POPUP_TICKS UI ticks after any parameter is set (poly.c flags each set_param), then comes back. */
+#define POPUP_TICKS 120                         /* measured: a pop-up lasts ~96-120 UI ticks */
+extern volatile int digicmi_param_moved;
+static int popup_hold;
+volatile int digicmi_uiticks;                   /* UI ticks, for the emulator test */
+
 static void draw_meter(void *bmp)
 {
     int load = digicmi_cpu_load, pc = load < 0 ? -1 : load * 100 / 256;
     pc = pc > 99 ? 99 : pc;
     meter_shown = load;
+    if (popup_hold)
+        return;
     fw_fillrect(bmp, 90, 55, 103, 62, 1);
     put_glyph(bmp, 91, pc < 0 ? 11 : pc / 10);
     put_glyph(bmp, 95, pc < 0 ? 11 : pc % 10);
@@ -405,6 +379,12 @@ void digicmi_page_tick(void *ctrl)
     uint32_t vl;
     digicmi_ts_tick();                          /* timesynth.c: the waves, when track 1's sample, STRT or LEN change */
     odd ^= 1;
+    digicmi_uiticks++;
+    if (digicmi_param_moved) {
+        digicmi_param_moved = 0;
+        popup_hold = POPUP_TICKS;
+    } else if (popup_hold && --popup_hold == 0 && cmi_live && ctrl)
+        *((unsigned char *)ctrl + 0x20) = 1;    /* the meter comes back */
     if (cmi_live && ctrl && digicmi_cpu_load != meter_shown)
         *((unsigned char *)ctrl + 0x20) = 1;    /* a CMI page is up and the meter's value moved (2 a second at most) */
     if (!page2_live || !ctrl) {                 /* page 2 isn't on screen: nothing to animate */
@@ -442,7 +422,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
         put_u(put_s(b, "B"), (unsigned)shown.blnd);
         vbox(bmp, 1, b, 0);
         put_u(put_s(b, "S"), (unsigned)shown.lmod);
-        vbox(bmp, 2, b, !shown.lmod);
+        vbox(bmp, 2, b, 0);
         put_secs(b, (unsigned)shown.lfin * 120u / 127u);
         vbox(bmp, 3, b, 0);
     } else {
@@ -523,7 +503,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     .cc = c, .min = 0, .max = 127 << 8, .def = (d) << 8, .fmt = f }
 
 static const struct cm_src_page pages[2] = {
-    {"CMI", {0, EX_8BIT, EX_ENG, 3, EX_SPRD, EX_ROOT, B, 7}, 0, {0, 0, 0}},
+    {"CMI", {0, EX_8BIT, EX_ENG, 3, EX_SPRD, B, B, 7}, 0, {0, 0, 0}},
     {"CMI LOOP", {1, EX_BLND, EX_LMOD, EX_LFIN, 4, 5, 6, 7}, 0, {0, 0, 0}},   /* drawn by digicmi_wave_draw */
 };
 
@@ -548,11 +528,12 @@ const struct cm_ui32 digicmi_page = {
           .cc = 25, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_lmod, .draw = lmod_draw },
         EXTRA("SPRD", "Stereo Spread", 0, fmt_sprd, 26),     /* slot 48 (0.3-0.6's DIR): cmi_loop.c */
         EXTRA("TIME", "Wave Pass Time", 64, fmt_time, 27),   /* slot 49, TIME only (0.3-0.19's LFIN; timesynth.c) */
-        { .name = "RETRO", .lname = "Retro", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
-          .cc = 28, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_retro, .draw = switch_draw },
+        EXTRA("RETRO", "Retro", 0, fmt_retro, 28),         /* slot 50: a dial of six steps (a switch 0.8-0.22) */
         { .name = "ENG", .lname = "Engine", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 29, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_eng, .draw = switch_draw },
-        EXTRA("ROOT", "Root (Time Synth)", 0, fmt_root, 30),  /* slot 52 (Digi Poly's marker until 0.19) */
+        /* 14: on no page, but machine-pages refuses the whole page unless all seven are valid. Slot 52: Digi
+         * Poly's marker until 0.19, the time synth's ROOT 0.20-0.22 (removed; the time synth is always AUTO). */
+        { .name = "-", .lname = "Unused", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT, .max = 0x7f00, .def = 0 },
     },
     .page_count = 2, .pages = pages,
 };

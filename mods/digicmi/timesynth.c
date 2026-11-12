@@ -296,9 +296,7 @@ void digicmi_ts_tick(void)
     strt = W(21);
     lenv = W(22);
     smear = (W(47) >> 8) & 127;
-    root = W(52) & 0xff ? 0 : (W(52) >> 8) & 127;   /* ROOT: 0 AUTO, else MIDI note 23 + value; a low byte (the
-                                                       marker older kits hold, 0x4b53) is AUTO */
-    root = root ? (root + 23 > 108 ? 108 : root + 23) : 0;
+    root = 0;                                       /* AUTO always: 0.20-0.22's ROOT selector (slot 52) is gone */
 #undef W
     strt = strt < 0 ? 0 : strt > FULL ? FULL : strt;
     lenv = lenv < 0 ? 0 : lenv > FULL ? FULL : lenv;

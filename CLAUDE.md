@@ -233,6 +233,14 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - `DIGICMI_INSNPROF=1` counts every instruction inside the render (0x40077428 -> 0x400784c8) per owner, by nearest MAP symbol (hooks added mid-run need `uc.ctl_flush_tb()`). 100 blocks: idle 85,113 instructions a block (firmware 98.2%, digicmi 1.3% = 1,141, machine-pages 0.4%, core ~0); 4 looping notes 84,913 (firmware 97.6%, digicmi 2.0% = 1,695: digicmi_play 832, digicmi_render 275, digipoly_levels 204). The stock render does the same work with or without notes (all tracks, filters, effects every block), so a high, flat load is the firmware's; Digi CMI adds ~1-2% of it.
 - At ~85k instructions a block and ~250 MHz, 85% of a 667 us block is ~1.6-1.7 cycles an instruction: plausible. So the UI gets what is left; Digi CMI cannot lower the stock part.
 
+## Zero-crossing loops, RETRO dial, ROOT gone (0.23)
+
+- `zc_snap` (cmi_loop.c): in `digicmi_play`, LOOP's start and END each move to the nearest upward zero crossing (pcm[i-1] < 0 <= pcm[i]) within 256 samples, the end first (>= start + MIN_LOOP), then the start (<= end - MIN_LOOP). Sample from SMP_TAB by the voice's SAMP (slot 20), used only when its length equals the player's (V+0x14). Cached per voice (pcm, ls, le). Measured: 4799/9600 -> 4800/9491 on the 440 Hz sine, both crossings.
+- RETRO = slot 50 as a dial (no CM_DRAW, no set_param snap; only ENG, slot 51, is still a switch): mode = value x 6 >> 7: 0 off, 1 16 bit 44.1 kHz (hold step 71332), 2 8 bit 32 kHz (98304), 3 8/24 (131072, the old RETRO), 4 8/16 (196608), 5 8/8 (393216); 8-bit truncation from mode 2. Old kits with the switch on (127) open at mode 5.
+- ROOT removed (page 1 F blank again; slot 52 is an unused, hidden extra, default 0); timesynth always AUTO.
+- SMEAR's box is always solid ("S" + value), like BLND's.
+- CPU meter vs knob pop-ups: a pop-up fills the title bar (e.g. "Retro=OFF 16BIT 48K" reaches the meter's strip). `digipoly_setparam` sets `digicmi_param_moved` for track voices; the page tick hides the meter for POPUP_TICKS = 120 UI ticks (measured: pop-ups last ~96-120 ticks in digiemu, via `digicmi_uiticks` logged at each snap), then asks for a frame. One frame of the pop-up's slide-out animation can still show the meter over it.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

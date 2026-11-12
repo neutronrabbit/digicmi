@@ -196,6 +196,8 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
         for _ in range(4):                      # page 1: B (8BIT) a little up, then down
             at(4, "encoder", 2, 4)
         at(30, "slots8bit", "8BIT turned up"); at(0, "snap", "q0_switch_on")
+        for k_ in range(1, 9):                   # the pop-up's life, in UI ticks
+            at(150, "snap", "q0_popup_%d" % k_)
         at(400, "snap", "q0_switch_on_later")    # the label back after the value's pop-up time
         for _ in range(4):
             at(4, "encoder", 2, -4)
@@ -522,6 +524,8 @@ def spin(m, pc, *args, **kw):
             E.inbox.append(("encoder", act[1], act[2]))
         elif k == "snap":
             png(os.path.join(a.png, act[1] + ".png"), E.fb)
+            if "digicmi_uiticks" in MAP:
+                log.append("snap %s at UI tick %d" % (act[1], struct.unpack(">i", uc.mem_read(MAP["digicmi_uiticks"], 4))[0]))
         elif k == "memsnap":
             if os.environ.get("DIGICMI_MEMDIFF"):
                 state.setdefault("snaps", {})[act[1]] = [bytes(uc.mem_read(a0, n0)) for a0, n0 in MEM_REGIONS]
