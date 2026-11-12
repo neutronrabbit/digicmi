@@ -1,0 +1,144 @@
+# Digi CMI
+
+A Fairlight CMI-style polyphonic sample instrument for the original Digitakt (mk1), as an
+[elekloader](https://github.com/elekloader/elekloader) mod. Track 1 becomes one 8-voice instrument that plays a
+single sample across the keyboard, with CMI-style loop controls, a RETRO mode that plays the sample the way an
+early CMI voice did, stereo spread and a time synth that builds a moving wavetable from the sample itself.
+
+> **Unofficial and unsupported. Not affiliated with, endorsed by or supported by Elektron or Fairlight.
+> Flashing modified firmware is at your own risk.** elekloader never touches the bootloader: flashing your
+> official OS file always restores the unit. Go back to the official OS before contacting Elektron support.
+
+## Overview
+
+- **Machine CMI** (id 40) in the FUNC+SRC machine list, on **track 1 only**. With CMI on track 1, tracks 2-8
+  become its voices: their machines can't be changed and their own trigs are silent until track 1 plays another
+  machine. Hold FUNC and the track keys turn blue.
+- **One sample, eight voices.** Notes from track 1's trigs (and chords) and from MIDI on any track's channel
+  play the sample pitched from **C3 (MIDI 60)**, one voice each. Velocity sets volume (the stock curve).
+  When more than eight notes sound, the quietest voice is taken.
+- **Loop controls** after the CMI's: forward, reverse and ping-pong loops between LOOP and the sample's END,
+  HOLD or SUSTAIN looping, fine loop start. Loops play at the note's pitch, so higher notes loop faster, and
+  loop points follow knobs, p-locks and LFOs while notes sound.
+- **RETRO**: 8 bits at 24 kHz with the CMI Series I's rate character (each voice's clock follows its pitch).
+- **SPRD**: stereo spread; at 127 notes alternate hard left and hard right.
+- **ENG = TIME**: a time-domain wavetable synth. Sixteen single cycles are cut from the sample between STRT
+  and END and played in turn while the note sounds, stepped or crossfaded, optionally smeared together.
+- A Digitakt II-style **waveform page** (page 2) with dotted markers and a playhead arrow for each sounding note.
+
+## Controls
+
+Page 1 (SRC):
+
+| Knob | Name | What it does |
+|---|---|---|
+| A | TUNE | Pitch, as ONESHOT |
+| B | RETRO | Switch: off, or 8-bit 24 kHz with CMI-style rate |
+| C | ENG | Switch: SMPL (the sample) or TIME (the time synth) |
+| D | SAMP | Sample slot |
+| E | SPRD | Stereo spread: 0 centred, 127 alternate notes hard left / hard right |
+| H | LEV | Level |
+
+Page 2 (press SRC again), with ENG = SMPL:
+
+| Knob | Name | What it does |
+|---|---|---|
+| A | PLAY | REV, REV.L, FWD.L, FWD, P (ping-pong loop) |
+| C | LMOD | HOLD: loop for as long as the voice sounds. SUS: loop while the note is held, then play on to the end |
+| D | LFIN | Fine loop start: one LOOP step in 128 |
+| E | STRT | Sample start |
+| F | LEN | Sample length (END = STRT + LEN) |
+| G | LOOP | Loop start (the loop runs to END) |
+| H | LEV | Level |
+
+Page 2 with ENG = TIME:
+
+| Knob | Name | What it does |
+|---|---|---|
+| A | PLAY | Order of the 16 waves: FWD and REV once, FWD.L and REV.L repeating, P back and forth |
+| B | BLND | 0 steps from wave to wave (CMI segments); 127 crossfades all the way |
+| C | SMEAR | Mixes each wave with its neighbours, up to all of them; 0 off (shares LMOD's value) |
+| E, F | STRT, LEN | The part of the sample the waves are cut from |
+| G | TIME | Time of one pass through the waves, 0.05 s to about 13 s (shown in seconds while turning) |
+| H | LEV | Level |
+
+CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, LFIN 27, RETRO 28, ENG 29. The other knobs keep ONESHOT's CCs.
+
+## Usage
+
+1. On track 1, open the machine list (FUNC+SRC), choose **CMI** and confirm. Tracks 2-8 are now its voices.
+2. Press SRC, set **SAMP** to a sample whose root is C3, and play: trigs on track 1, chords from its TRIG page,
+   or a MIDI keyboard on any track's channel.
+3. Press SRC again for the waveform page. Set PLAY to FWD.L, REV.L or P and move LOOP (and LFIN) to loop the tail;
+   LMOD SUS loops only while a key is held.
+4. Back on page 1, turn RETRO on for the CMI's 8-bit grit, or SPRD up to spread notes across the stereo field.
+5. For the time synth, set ENG to TIME, choose the region with STRT/LEN, the speed with TIME, and shape the
+   movement with BLND and SMEAR.
+
+## Compatibility and limitations
+
+- **Digitakt mk1, OS 1.54.** Built against 1.54; the OS 1.53 addresses are only partly checked, so 1.53 is untested.
+- Needs elekloader's **core** (built with 4.3) and **machine-pages** (1.10).
+- **Conflicts** (same patch sites or sound slots): Digi Poly, dt8poly, DIGISLICER, Digi EQ, Digi Matrix.
+- CMI can only be chosen on track 1 and uses all eight tracks as voices while it is there.
+- The sample (and the time synth's cycle length) assumes a root of C3; there is no root-note setting.
+- SMEAR is set per track (from track 1's value) and acts when the knob moves; p-locks and LFOs don't change it per note.
+- Kits saved with CMI load that track as ONESHOT on the stock OS.
+
+## Tests and measurements
+
+Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digiemu_poly.py`):
+
+- Loop modes: windows, wraps, ping-pong turns, SUS release-to-end; loop laps scale with pitch
+  (E ×1.260, G ×1.498, B ×1.888 against C).
+- RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
+- SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
+- TIME: plays at 262 Hz for C3 (183-sample period) at a level close to the sample's.
+- Voice stealing always takes the quietest eligible voice; every voice gets its own note's velocity.
+
+Hardware: builds up to 0.14 were run on the author's Digitakt mk1 during development, and the faults found
+there were fixed in 0.9-0.16. **0.17 and 0.18 have only been run in digiemu.** BLND and SMEAR have not been
+checked by ear, and CPU load with eight time-synth voices has not been measured.
+
+## Building
+
+You need elekloader and your own official OS file (`Digitakt_OS1.54.syx`, from Elektron). No firmware is
+included here.
+
+```bash
+python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.18-os1.54.elemod --out digicmi.syx
+```
+
+Then send the `.syx` with Elektron Transfer.
+
+## Authorship and licences
+
+- **Digi CMI**: neutronrabbit, with Claude (Anthropic) as coding assistant. MIT, see [LICENSE](LICENSE).
+- Forked from **Digi Poly 2.1** by gdeo607 and the digi1_mods authors
+  ([gdeo607/digi1_mods](https://github.com/gdeo607/digi1_mods) at `32fd22a1fd66fa5833b808b1c1c049a0deb82d88`,
+  see `mods/digicmi/UPSTREAM`): the polyphony, voice borrowing and kit storage come from it. Its MIT licence is
+  kept in [LICENSE-digi1_mods](LICENSE-digi1_mods).
+- Built on [elekloader](https://github.com/elekloader/elekloader) and its core and machine-pages mods.
+- "CMI" refers to the Fairlight CMI, whose looping, waveform synthesis and 8-bit sound this mod is modelled on.
+  No Fairlight code, samples or artwork are used.
+
+## Screens
+
+All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a unit.
+
+| | |
+|---|---|
+| ![Machine list with CMI selected](media/01-machine-menu.png) | ![Page 1](media/02-page1.png) |
+| Machine list, CMI selected on track 1 (0.10; unchanged since) | Page 1: TUNE, RETRO, ENG, SAMP / SPRD, LEV (0.18) |
+| ![Page 2, sample](media/03-page2-sample.png) | ![Page 2, time synth](media/04-page2-time.png) |
+| Page 2, FWD.L loop, a note's playhead arrow (0.18) | Page 2 with ENG = TIME: BLND, SMEAR, the 16 waves' places (0.18) |
+| ![TIME readout](media/05-page2-time-turning.png) | |
+| G turning in TIME mode: the pass time in seconds (0.18) | |
+
+## History
+
+Each version is a tagged commit (`v0.1` ... `v0.18`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+versions was reconstructed from the development session and checked against the source hashes recorded in each
+built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
+built files in some comment text.

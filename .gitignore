@@ -1,0 +1,8 @@
+# Firmware and build output: never commit stock OS files or images built from them
+*.syx
+*.elemod
+build/
+# local reference captures and OS junk
+mk1-stock-waveform-view.png
+.DS_Store
+__pycache__/
