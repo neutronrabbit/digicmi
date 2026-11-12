@@ -241,6 +241,12 @@ ghidra-projects/
 - Emulator loop: patch a `.syx` into `build/`, then `tools/digiemu/.venv/bin/python -m emu.portable --add build/<name>.syx --yes` (about a minute; `--list` shows the folder name, e.g. `dt1-cmi1-5a2e323b`), then `tools/digiemu/.venv/bin/python digicmi/tests/digiemu_poly.py --digiemu tools/digiemu --fw <folder> --stock firmware/Digitakt_OS1.54.syx --elekloader elekloader --mods build/core-4.3-os1.54.elemod build/digicmi-0.3-os1.54.elemod build/machine-pages-1.10-os1.54.elemod --png build/emu-png` (about 1 minute, prints PASS/FAIL). `DIGICMI_VELS=1` overrides each CMI note's velocity across the layer edges and checks the SLICE lock and the voice's SLICE; the lock-list leak check always runs. Use absolute paths, or run it from the digihack root.
 - Always test in the emulator before flashing. Flashing is done manually by the user through Elektron Transfer; never attempt it from here.
 
+## Git repository
+
+- `digicmi/` is a git repo (branch `main`), one commit per version tagged `v0.1`...`v0.18`, then repo docs. Earlier versions were reconstructed by replaying the development session and checked against each `.elemod`'s `build.sources` hashes (0.11 by rebuilding the flashed .syx byte-for-byte; 0.4/0.5 match in compiled code only, `cmi_page.c` comment text differs).
+- For each new version: bump `mod.json`, build, test, then commit and tag `vX.Y`, and add a CHANGELOG entry. Never commit `.syx`/`.elemod` files or anything from the stock OS (`.gitignore`).
+- Modwerk (modwerk.app) takes Digitakt mods as released `.elemod` files via a PR to repeat98/modwerk (`sdk/digitakt/modules/<id>/`, owner review, hardware evidence, real LCD captures, 320x192 SVG thumbnail, changelog JSON). The elekloader shop is a separate route (Submit a mod issue form). Before releasing: update `mod.json`'s description (still describes the spectral engine) and author.
+
 ## Key references
 
 - elekloader ADAPTING.md: https://github.com/elekloader/elekloader/blob/main/docs/ADAPTING.md
