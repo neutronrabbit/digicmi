@@ -612,6 +612,7 @@ def spin(m, pc, *args, **kw):
                 else:
                     vals_ = [12000 * math.sin(2 * math.pi * hz_ * i / 48000) for i in range(n)]
                 pcm = b"".join(struct.pack(">h", int(x)) for x in vals_)
+                state["test_pcm"] = [int(x) for x in vals_]
                 if os.environ.get("DIGICMI_REGIONS"):
                     for r0, r1, pr in uc.mem_regions():
                         log.append("region 0x%08x-0x%08x %d" % (r0, r1, pr))
@@ -627,6 +628,12 @@ def spin(m, pc, *args, **kw):
                 for k_ in (kit, ek):             # PLAY = FWD.L (2), LOOP = 60 (half way), on both kits' sound
                     uc.mem_write(k_ + 0x20 + 0x14 + 2 * 18, struct.pack(">h", PROBE_PLAY << 8))
                     uc.mem_write(k_ + 0x20 + 0x14 + 2 * 23, struct.pack(">h", PROBE_LOOP << 8))
+                if os.environ.get("DIGICMI_LEN") is not None:     # LEN (slot 22) on both kits and every voice copy
+                    lv_ = int(os.environ["DIGICMI_LEN"]) << 8
+                    for k_ in (kit, ek):
+                        uc.mem_write(k_ + 0x20 + 0x14 + 2 * 22, struct.pack(">h", lv_))
+                    for w in range(8):
+                        uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + 22), struct.pack(">h", lv_))
                 if os.environ.get("DIGICMI_ENG") is not None:     # ENG (slot 51) on both kits and every voice copy
                     ev_ = int(os.environ["DIGICMI_ENG"]) << 8
                     for k_ in (kit, ek):
@@ -712,6 +719,12 @@ def spin(m, pc, *args, **kw):
             per_s = pre * (pmr + 1) / 132e6
             log.append("PIT%d step %d: PCSR 0x%04x PMR %d PCNTR %d prescaler %d -> period %.4f ms, tick %.3f us, %.1f ticks a 667 us block"
                        % (ch, state["n"], pcsr, pmr, pcntr, pre, per_s * 1e3, pre / 132e6 * 1e6, 666.7e-6 / (pre / 132e6)))
+    if os.environ.get("DIGICMI_VDUMP") and state["n"] in (2100, 2500):   # the player's voice states, for the PCM pointer
+        for v_ in range(8):
+            raw_ = uc.mem_read(0x8000EDC4 + 94 * v_, 96)
+            hits = [o for o in range(0, 92, 2) if 0x44000000 <= struct.unpack(">I", raw_[o:o + 4])[0] < 0x44100000]
+            log.append("V(%d) step %d: on %d, words at the test PCM: %s %s" % (v_, state["n"], raw_[0x28], hits,
+                       [hex(struct.unpack(">I", raw_[o:o + 4])[0]) for o in hits]))
     if "digicmi_cpu_load" in MAP:                 # the CPU meter: what it measured, and a fake value for screenshots
         cl_ = struct.unpack(">i", uc.mem_read(MAP["digicmi_cpu_load"], 4))[0]
         state.setdefault("cpu_seen", set()).add(cl_)
@@ -874,10 +887,22 @@ if LOOPTEST:
     def sc(val, ln):                              # cmi_loop.c's scale(), independently
         return (ln // 0x7800) * val + ((ln % 0x7800) * val) // 0x7800
     L = TEST_LEN
-    llen, lmod, dirx, lfin = PROBE_EXTRAS[:4]
-    ls = sc(min(max(PROBE_LOOP * 256 - 1 + 2 * lfin, 0), 0x7800), L)
-    le = min(ls + (L // 128) * llen + ((L % 128) * llen) // 128, L)
-    se = sc(0x7800, L)
+    llen, lmod, dirx, lfin = PROBE_EXTRAS[:4]     # (LLEN gone in 0.13, LFIN in 0.20: the loop runs LOOP -> END)
+    lenv_ = min(int(os.environ.get("DIGICMI_LEN", "120")) << 8, 0x7800)
+    se = sc(lenv_, L)                             # END (STRT is 0)
+    ls = sc(min(max(PROBE_LOOP * 256 - 1, 0), lenv_), L)
+    le = se
+    pcm_ = state.get("test_pcm")
+    def zc_(pos, lo, hi):                         # 0.23: cmi_loop.c's zc_near, independently
+        lo, hi = max(lo, 1), min(hi, L - 1)
+        for d in range(257):
+            for i in ((pos + d,) if d == 0 else (pos + d, pos - d)):
+                if lo <= i <= hi and pcm_[i - 1] < 0 <= pcm_[i]:
+                    return i
+        return pos
+    if pcm_ and le - ls >= 320:
+        le = zc_(le, ls + 320, L - 1)
+        ls = zc_(ls, 1, le - 320)
     print("loop test %s: knobs LLEN LMOD DIR LFIN %s; expected loop [%d, %d], end %d" % (LOOPTEST, PROBE_EXTRAS, ls, le, se))
     s32 = lambda x: x - 2**32 if x >= 2**31 else x
     notes = []                                    # per voice, the blocks of each note on the test sample
@@ -957,16 +982,22 @@ if LOOPTEST:
                 held = body[:i0]
                 if any(r[4] != 2 or s32(r[3]) != le for r in held[:len(held)]):
                     lt_fail.append("voice %d note %d: not looping [%d, %d] while held" % (v, note, ls, le))
-                tail = body[i0:]
-                if any(r[4] != 3 or s32(r[3]) != se for r in tail if r[8]):
-                    lt_fail.append("voice %d note %d: after release, not FWD to %d" % (v, note, se))
+                tail = body[i0:]                 # 0.24: on past END to the sample's own end, L
+                if any(r[4] != 3 or s32(r[3]) != L for r in tail if r[8]):
+                    lt_fail.append("voice %d note %d: after release, not FWD to the sample's end %d" % (v, note, L))
                 off = next((j for j, r in enumerate(tail) if not r[8]), None)
                 if off is not None:
                     last = tail[off - 1][5] if off else tail[0][5]
-                    if last < se - rate - 200:
-                        lt_fail.append("voice %d note %d: stopped at %d, before the end %d" % (v, note, last, se))
-                    elif max(r[5] for r in tail[:off]) > le:
+                    if last < L - rate - 200:
+                        lt_fail.append("voice %d note %d: stopped at %d, before the sample's end %d" % (v, note, last, L))
+                    elif max(r[5] for r in tail[:off]) > se:
                         released_ok += 1
+            elif L - se < 64:                    # 0.24: no tail after END: it keeps looping through the release
+                late = [r for r in body if r[8] and r[0] > body[0][0] + 200]
+                if late and all(r[4] == 2 for r in late):
+                    released_ok += 1
+                elif late:
+                    lt_fail.append("voice %d note %d: no tail, but stopped looping after release" % (v, note))
         checked += 1
     if LOOPTEST == "live":                      # LOOP turned while the chord sounds: the loop's start moves
         held = [(v, rs) for v, rs in notes if rs and rs[0][0] <= LIVE_STEP <= rs[-1][0]]
@@ -987,7 +1018,7 @@ if LOOPTEST:
     if LOOPTEST in ("hold", "lfin", "alt", "rev") and speed < 2:
         lt_fail.append("too few laps to measure loop speed against pitch (%d)" % speed)
     if LOOPTEST == "sus" and not released_ok:
-        lt_fail.append("no released note played on past the loop to the end and stopped")
+        lt_fail.append("no released note played its tail to the sample's end, or looped on with no tail")
     fails.extend(lt_fail)
 
 if os.environ.get("DIGICMI_LOOPPROBE"):

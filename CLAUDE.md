@@ -241,6 +241,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - SMEAR's box is always solid ("S" + value), like BLND's.
 - CPU meter vs knob pop-ups: a pop-up fills the title bar (e.g. "Retro=OFF 16BIT 48K" reaches the meter's strip). `digipoly_setparam` sets `digicmi_param_moved` for track voices; the page tick hides the meter for POPUP_TICKS = 120 UI ticks (measured: pop-ups last ~96-120 ticks in digiemu, via `digicmi_uiticks` logged at each snap), then asks for a frame. One frame of the pop-up's slide-out animation can still show the meter over it.
 
+## SUS release fixed (0.24)
+
+- Reported on the unit: SUS + a MIDI note, released, the sound stops at once despite an infinite AMP release. Cause: since 0.13 the loop end is END, and SUS's release window was [LOOP, END] as FWD: the voice finished its pass and hit END, where the player ends a non-looping voice regardless of the envelope.
+- Now (cmi_loop.c): released SUS forward plays [LOOP, the sample's length] as FWD (the tail after END) when len - END >= TAIL_MIN (64); REV.L plays [END, 0] when STRT >= 64. No tail: no SUS branch, so it keeps looping (as HOLD) and the AMP release fades it.
+- **V(v) + 0 is the playing sample's PCM pointer** (measured with `DIGICMI_VDUMP`); `zc_snap` uses it instead of SAMP's table entry, which lagged a voice's first blocks (HOLD test saw unsnapped windows there).
+- Loop test fixed for 0.13/0.20/0.23 (loop to END, no LFIN, snapped points computed from the test PCM; `DIGICMI_LEN` sets LEN). Passing: sus with LEN 90 (36 tails played out) and 120 (28 looped on), hold, rev.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

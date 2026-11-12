@@ -49,7 +49,7 @@ Page 2 (press SRC again), with ENG = SMPL:
 | Knob | Name | What it does |
 |---|---|---|
 | A | PLAY | REV, REV.L, FWD.L, FWD, P (ping-pong loop) |
-| C | LMOD | HOLD: loop for as long as the voice sounds. SUS: loop while the note is held, then play on to the end |
+| C | LMOD | HOLD: loop for as long as the voice sounds; the AMP release fades it. SUS: loop while the note is held, then play the sample's tail past END to its own end (REV.L: past STRT to its start); with END at the sample's end there is no tail, so it keeps looping and the AMP release fades it |
 | E | STRT | Sample start |
 | F | LEN | Sample length (END = STRT + LEN) |
 | G | LOOP | Loop start (the loop runs to END) |
@@ -75,7 +75,8 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29. The other knobs
 2. Press SRC, set **SAMP** to a sample whose root is C3, and play: trigs on track 1, chords from its TRIG page,
    or a MIDI keyboard on any track's channel.
 3. Press SRC again for the waveform page. Set PLAY to FWD.L, REV.L or P and move LOOP to loop the tail;
-   LMOD SUS loops only while a key is held.
+   LMOD SUS loops only while a key is held, then plays whatever comes after END: set END before the sample's
+   natural ending to hear that ending on release.
 4. Back on page 1, turn RETRO on for the CMI's 8-bit grit, or SPRD up to spread notes across the stereo field.
 5. For the time synth, set ENG to TIME, choose the region with STRT/LEN, the speed with TIME and the looping
    with PLAY and LOOP, and shape the movement with BLND and SMEAR.
@@ -109,6 +110,9 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
+- SUS (0.24): with END at 75% of the test sample, released notes play on to the sample's end and stop; with END
+  at the sample's end they keep looping through the release. HOLD and REV.L loop windows match the snapped points
+  on every block.
 - Zero-crossing loops (0.23): on the 440 Hz test sine, LOOP halfway and END at the sample's end gave the window
   4799-9600; snapped it is 4800-9491, both upward zero crossings.
 - TIME loops (0.20): with LOOP halfway (wave 7.5), FWD.L jumps back to it after the last wave, REV.L from it to
@@ -118,7 +122,7 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
 - Voice stealing always takes the quietest eligible voice; every voice gets its own note's velocity.
 
 Hardware: builds up to 0.14 were run on the author's Digitakt mk1 during development, and the faults found
-there were fixed in 0.9-0.16. **0.17-0.23 have only been run in digiemu.** The CPU meter's readings in particular are unverified: the
+there were fixed in 0.9-0.16. **0.17-0.24 have only been run in digiemu.** The CPU meter's readings in particular are unverified: the
 emulator doesn't model the timer it reads, so only its drawing has been checked. BLND and SMEAR have not been
 checked by ear, and CPU load with eight time-synth voices has not been measured.
 
@@ -129,7 +133,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.23-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.24-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -158,7 +162,7 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.23`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.24`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

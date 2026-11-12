@@ -11,8 +11,11 @@
  * For a CMI voice whose PLAY is FWD.L, this replaces the window and the PLAY those places read:
  *   (LLEN, 0.3-0.12: gone in 0.13; the loop ends at the sample's END, STRT + LEN, as stock)
  *   (LFIN, 0.3-0.19: gone in 0.20; slot 49 is the time synth's TIME)
- *   LMOD  HOLD loops for as long as the voice sounds; SUS loops while the note is held, then plays on to
- *         END and stops (held: the AMP envelope's phase is not 0; it turns 0 at a live note's note-off and
+ *   LMOD  HOLD loops for as long as the voice sounds; SUS loops while the note is held, then plays the
+ *         sample's tail: on past END to the sample's own end (REV.L: past STRT down to its start) and stops.
+ *         With no tail there (END at the sample's end; REV.L: LOOP at its start) it keeps looping and the AMP
+ *         envelope's release fades it, as HOLD. (0.13-0.23 played on to END only: with the loop ending at END
+ *         since 0.13, a released SUS note stopped within one pass, whatever the release.) (held: the AMP envelope's phase is not 0; it turns 0 at a live note's note-off and
  *         at the end of a sequencer trig's length, both measured)
  *   DIR   FWD, or ALT: forward, then backward, and so on (the turn moves the playhead on by TURN_K samples,
  *         the resampler's delay, so the waveform carries on where it left off: digislicer's measured value
@@ -38,14 +41,11 @@ typedef unsigned int u32;
 #define P_REV      0
 #define P_PP       4                                         /* CMI's own: ping-pong */
 #define TURN_K     14
+#define TAIL_MIN   64                                        /* samples: less than this is no tail to play */
 #define MIN_LOOP   320                                       /* samples: the player keeps 141 at each end */
 #define FULL       0x7800                                    /* 120.0: STRT, LEN and LOOP's scale */
 
-#ifdef OS154
-#define SMP_TAB    0x4031a3a0u                               /* sample slots, 16 bytes each: PCM, 0, length, ratio */
-#else
-#define SMP_TAB    0x403193a0u
-#endif
+#define PCM(v)     (*(const short *volatile *)V(v))          /* the playing sample's PCM (V + 0, measured) */
 #define ZC_REACH   256                                       /* samples either side searched for a zero crossing */
 
 /* The loop's points on zero crossings (0.23): the nearest upward crossing (one sample < 0, the next >= 0) to
@@ -73,11 +73,11 @@ static int zc_near(const short *pcm, int len, int pos, int lo, int hi)
 
 static void zc_snap(int v, int *ls, int *le)
 {
-    const volatile u32 *e = (const volatile u32 *)(SMP_TAB + 16u * (u32)((PARAM(v, 20) >> 8) & 255));
-    const short *pcm = (const short *)e[0];
+    const short *pcm = PCM(v);                               /* the sample the player is playing (0.24: was found
+                                                                through SAMP, which lags a voice's first blocks) */
     int len = (int)SLEN(v);
-    if ((u32)pcm < 0x40000000u || (int)e[2] != len || len < 1024)
-        return;                                              /* not the voice's sample as far as we can tell */
+    if ((u32)pcm < 0x40000000u || len < 1024)
+        return;
     if (pcm != zc_pcm[v] || *ls != zc_in[v][0] || *le != zc_in[v][1]) {
         zc_pcm[v] = pcm;
         zc_in[v][0] = *ls;
@@ -158,9 +158,10 @@ int digicmi_play(int v, int play, int *win)
         released[v] = 1;
 
     if (rev) {                                               /* REV.L: the same loop, backwards from END */
-        if (sus && released[v] && !start) {                  /* SUS, let go: on down to STRT, and stop */
+        if (sus && released[v] && !start && s0 >= TAIL_MIN) {    /* SUS, let go: down past STRT to the
+                                                                    sample's start, and stop */
             win[0] = le;
-            win[1] = s0;
+            win[1] = 0;
             eff[v] = P_REV;
             return P_REV;
         }
@@ -169,9 +170,10 @@ int digicmi_play(int v, int play, int *win)
         eff[v] = P_REVL;
         return P_REVL;
     }
-    if (sus && released[v] && !start) {                      /* SUS, let go: on to the end, and stop there */
+    if (sus && released[v] && !start && (int)len - se >= TAIL_MIN) {   /* SUS, let go: on past END to the
+                                                                    sample's end (its tail), and stop there */
         win[0] = ls;
-        win[1] = se;
+        win[1] = (int)len;
         eff[v] = P_FWD;
         return P_FWD;
     }

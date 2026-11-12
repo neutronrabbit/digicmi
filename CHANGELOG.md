@@ -1,6 +1,10 @@
 # Changelog
 
-Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.23 only in digiemu.
+Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.24 only in digiemu.
+
+## 0.24 (2026-11-12): SUS plays the tail
+
+A released SUS note stopped at once: since 0.13 the loop ends at END, so "play on to END" had nothing left to play, and the voice ended whatever the AMP release. Now it plays the sample's tail past END to its own end (REV.L: past STRT to its start), or, with no tail, keeps looping so the AMP release fades it. Loop points snap using the sample the voice is actually playing.
 
 ## 0.23 (2026-11-12): zero-crossing loops, RETRO dial, no ROOT
 
