@@ -255,6 +255,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Still open: track 1's own sequencer trig always plays on voice 0 (stock), cutting the previous trig's tail there. Moving it to the quietest voice is possible in route_c (as chord copies), but the trig's length/note-off handling for a moved own-trig is untested.
 - AMP kit slots, by the PAN finding: attack 38, hold 39, decay 40, overdrive 41, delay send 42, reverb send 43, pan 44, volume 45 (the range table's last field is 1 higher for these).
 
+## Faded voices off (0.26) and the 0.25 load report
+
+- On the unit with 0.25: meter 86% after boot, 94% after playing with every note silent; UI lag everywhere (not just page 2). Released notes piled up on all voices (0.25's free-voice choice), each looping silently for good: the AMP envelope settles near -135 dB, never 0 (`DIGICMI_PILEUP=1`).
+- In digiemu the pile-up costs ~1% more render instructions (85,966 vs 85,113 a block), so the unit's +8% is likely memory/cache (six samples streaming), which the emulator can't show. The UI's share is what audio leaves (~14% -> ~6%): hence lag everywhere.
+- Fix (cmi_loop.c): a released CMI voice below -72 dB gets `fade_end`; `digicmi_stage` then reports it non-looping with end reached (the gain stage quarters its gain each block); once V+0x10 (gain) is 0, `digicmi_render` clears V+0x28 (voice on), its state after boot. Only setting the end flag (first attempt) silences but leaves the voice on. Measured: six released voices all off within 450 steps; overlap, SUS and HOLD tests still pass.
+- Unverified on hardware: whether the meter returns to ~86% after playing, and the lag.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

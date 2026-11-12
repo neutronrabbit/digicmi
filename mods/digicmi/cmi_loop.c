@@ -89,6 +89,17 @@ static void zc_snap(int v, int *ls, int *le)
     *le = zc_out[v][1];
 }
 
+/* Voice off when faded (0.26): a released CMI note whose AMP envelope has fallen below FADE_END is ended. The
+ * envelope settles near -135 dB and never reaches 0 (measured), so a looping note would otherwise keep its voice
+ * on and streaming its sample for good; with 0.25's free-voice choice released notes piled up on all eight voices.
+ * On the unit that raised the audio load (86% -> 94% on the meter, after playing, with nothing audible) and the
+ * UI lagged everywhere; the emulator shows only +1% instructions, so the cost is the real chip's (likely the
+ * streaming samples crowding the cache). Two steps: the gain stage first sees "not looping, end reached" and
+ * fades the gain to 0 (its own end-of-sample path, digicmi_stage); once the gain is 0 the voice is switched off
+ * (V + 0x28 = 0, its state after boot) in digicmi_render. A new note on the voice starts it again as usual. */
+#define FADE_END   0x80000                                   /* Q31 magnitude: -72 dB */
+static unsigned char fade_end[8];
+
 static signed char dir[8];
 static unsigned char released[8], have[8], eff[8];
 static int last[8];
@@ -218,6 +229,10 @@ int digicmi_play(int v, int play, int *win)
 /* The later stage's PLAY word (its loop flag), for voice v: ours for a CMI voice, else the stock word. */
 int digicmi_stage(int v, int word)
 {
+    if ((unsigned)v < 8 && fade_end[v]) {                    /* faded out: end it, as at a sample's end */
+        *(volatile unsigned char *)(V(v) + 0x29) = 1;
+        return (word & 0xff) | (P_FWD << 8);
+    }
     if ((unsigned)v > 7 || !eff[v])
         return word;
     return (word & 0xff) | (eff[v] << 8);
@@ -285,6 +300,15 @@ void digicmi_render(int32_t *blocks)
     int v, i;
     for (v = 0; v < 8; v++) {
         int32_t *b = blocks + 32 * v;
+        int lvl_ = fw_amp_env[3 * v + 1];
+        if ((fw_voice_start >> v) & 1)
+            fade_end[v] = 0;                                 /* a new note */
+        else if (fade_end[v]) {
+            if (GAIN(v) == 0)                                /* faded to nothing: the voice off, as after boot */
+                *(volatile unsigned char *)(V(v) + 0x28) = 0;
+        } else if (is_cmi(v) && *(volatile unsigned char *)(V(v) + 0x28) && fw_amp_env[3 * v] == 0
+                   && lvl_ > -FADE_END && lvl_ < FADE_END)
+            fade_end[v] = 1;                                 /* released and below -72 dB: end it */
         if (!is_cmi(v)) {
             hold_last[v] = POS(v);
             continue;

@@ -1,6 +1,10 @@
 # Changelog
 
-Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.25 only in digiemu.
+Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
+
+## 0.26 (2026-11-12): faded voices switch off
+
+On the unit, 0.25 left released notes running silently on every voice (the AMP envelope never quite reaches zero), and the audio load rose from 86% to 94% after playing, with the UI lagging everywhere. A released note that has faded below -72 dB is now ended and its voice switched off, as after boot. Known issue: the load effect is the real chip's and is not measurable in the emulator; check the meter after playing.
 
 ## 0.25 (2026-11-12): released notes ring on
 
