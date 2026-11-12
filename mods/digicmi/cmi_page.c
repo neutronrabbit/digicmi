@@ -214,7 +214,6 @@ static int32_t fmt_play(char *buf, int32_t v, int32_t ctx, int32_t m)
     return 1;
 }
 
-static int page2_age = 1000;                    /* UI ticks since page 2 was last drawn (1000: not on show) */
 void digicmi_ts_tick(void);
 int digicmi_ts_pos(int v);
 
@@ -227,7 +226,6 @@ static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32
 {
     int on = ((value >> 8) & 127) >= 96, x0 = x + 2, x1 = x + 16, y0 = y + 5, y1 = y + 11;
     (void)flag;
-    page2_age = 1000;                                           /* page 1 is on show, not page 2 */
     fw_fillrect(bmp, x0 + 1, y0, x1 - 1, y0, 1);                /* a rounded outline */
     fw_fillrect(bmp, x0 + 1, y1, x1 - 1, y1, 1);
     fw_fillrect(bmp, x0, y0 + 1, x0, y1 - 1, 1);
@@ -290,7 +288,6 @@ static int32_t lmod_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t
     shown.eng = (v[7] >> 8) & 127;
     shown.lmod = (value >> 8) & 127;
     shown.on = 1;
-    page2_age = 0;
     return 0;
 }
 
@@ -356,22 +353,31 @@ static void vbox(void *bmp, int k, const char *s, int dotted_frame)
     fw_textf(bmp, fw_font5, cx - 2 * n + 1, BOX_Y0 + 2, -1, "%s", s);
 }
 
-/* UI tick: while page 2 is what the SRC page last drew and a CMI note sounds (or just stopped), ask for
- * a frame each tick so the playheads move. */
+/* UI tick: while page 2 is on screen and a CMI note sounds (or just stopped), ask for a frame every other
+ * tick (15 a second) so the playheads move. "On screen" is whether the last frame drawn, on any screen, was
+ * page 2 (page2_live, set by digicmi_wave_draw, which ev_draw calls for every frame), so the requests stop
+ * as soon as another screen is drawn. (0.11-0.20 kept asking for up to 1000 ticks, ~33 s, after page 2 was
+ * last drawn, so the screen that followed - the sample browser, say - was redrawn 30 times a second while
+ * notes sounded, and the UI felt sluggish.) */
+static int page2_live;
 
 void digicmi_page_tick(void *ctrl)
 {
-    static int was;
+    static int was, odd;
     int v, pos, any = 0;
     uint32_t vl;
     digicmi_ts_tick();                          /* timesynth.c: the waves, when track 1's sample, STRT or LEN change */
-    if (page2_age < 1000)
-        page2_age++;
+    odd ^= 1;
+    if (!page2_live || !ctrl) {                 /* page 2 isn't on screen: nothing to animate */
+        was = 0;
+        return;
+    }
     for (v = 0; v < 8; v++)
         any |= digicmi_voice_pos(v, &pos, &vl);
-    if (page2_age < 1000 && (any || was) && ctrl)
+    if ((any || was) && odd)
         *((unsigned char *)ctrl + 0x20) = 1;
-    was = any;
+    if (odd)
+        was = any;
 }
 
 void digicmi_wave_draw(void *bmp, void *ctrl)
@@ -383,6 +389,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     char b[12];
     int c, endv, loopv, le, looped;
     (void)ctrl;
+    page2_live = shown.on;                       /* this frame is page 2, or another screen */
     if (!shown.on)
         return;
     shown.on = 0;

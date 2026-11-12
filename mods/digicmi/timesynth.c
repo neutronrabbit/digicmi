@@ -272,7 +272,10 @@ static void smear_into(int into, int smear)
     }
 }
 
-/* UI tick: track 1's sample, STRT and LEN; the tables rebuilt when they change. */
+/* UI tick: track 1's sample, STRT and LEN; the tables rebuilt when they change. Only with ENG = TIME (sample mode
+ * never reads them), and only once the inputs have held still for SETTLE ticks, so scrolling through samples or
+ * sweeping STRT doesn't cut, detect and smear for every value on the way (the first build is at once). */
+#define SETTLE 6
 void digicmi_ts_tick(void)
 {
     uint8_t *kit = fw_kit, *snd;
@@ -280,12 +283,15 @@ void digicmi_ts_tick(void)
     const short *pcm;
     u32 len;
     int strt, lenv, smear, root;
+    static int last_key = -1, still;
     if (!kit)
         return;
     snd = FW_SOUND(kit, 0);
     if (snd[FW_SOUND_MACHINE] != 40)
         return;
 #define W(k) (*(int16_t *)(snd + 0x14 + 2 * (k)))
+    if (((W(51) >> 8) & 127) < 96)                  /* ENG = SMPL: no waves needed */
+        return;
     e = (const volatile u32 *)(SMP_TAB + 16u * (u32)((W(20) >> 8) & 255));
     strt = W(21);
     lenv = W(22);
@@ -303,6 +309,15 @@ void digicmi_ts_tick(void)
     if (bank >= 0 && pcm == built_pcm && len == built_len && strt == built_strt && lenv == built_lenv
         && smear == built_smear && root == built_root)
         return;
+    {                                               /* settle: the same inputs for SETTLE ticks first */
+        int key = (int)((u32)pcm ^ len ^ ((u32)strt << 1) ^ ((u32)lenv << 9) ^ ((u32)smear << 17) ^ ((u32)root << 24));
+        if (key != last_key) {
+            last_key = key;
+            still = 0;
+        }
+        if (bank >= 0 && ++still < SETTLE)
+            return;
+    }
     if (bank < 0 || pcm != built_pcm || len != built_len || strt != built_strt || lenv != built_lenv
         || root != built_root)
         cut(pcm, len, strt, lenv, root);

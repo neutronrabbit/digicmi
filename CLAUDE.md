@@ -215,6 +215,12 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - G's fmt is plain fmt_pos again; the 0.18 TIME label overlay and seconds-while-turning on G are gone (TIME shows seconds in its own D box).
 - Build `build/digicmi-0.20.syx` (CM20); digiemu only.
 
+## UI load (0.21)
+
+- The user reported the unit feeling sluggish at times (e.g. selecting samples). Changes: page 2's playhead redraw requests (ctrl + 0x20) every other tick (15/s) and only while the last frame drawn was page 2 (`page2_live`, set in `digicmi_wave_draw`, which ev_draw calls per frame); 0.11-0.20 asked for up to 1000 ticks after page 2 was last drawn. Time-synth tables: only with ENG = TIME, and only after the inputs hold still for 6 ticks (first build at once).
+- Measured (digiemu, `DIGICMI_REDRAWTEST=1`): frames per 400 steps with a looping note held: page 2 53 -> 33; after switching to the TRIG page 2 in both 0.20 and 0.21, so the redraw request only drives the SRC view's own frames: the "redraws leak to other screens" theory is NOT confirmed (screens shown by the SRC view itself, like the sample list, untested). Cause of the sluggishness still unknown; a frame's cost was not measured.
+- A partial screen update (arrows only) would need the firmware's LCD transfer path: not known; ev_draw only draws inside frames the firmware composes.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

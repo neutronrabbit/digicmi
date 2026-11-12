@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.20 only in digiemu.
 
+## 0.21 (2026-11-12): lighter on the UI
+
+Page 2 asks for playhead redraws at 15 frames a second instead of 30, and only while the last frame drawn was page 2. The time synth's waves are rebuilt only with ENG = TIME and only once the sample, STRT, LEN, SMEAR or ROOT have held still for a moment, not for every value while scrolling.
+
 ## 0.20 (2026-11-12): TIME takes the sample's loop layout; LFIN removed; ROOT on page 1
 
 LFIN (fine loop start) is gone from both engines. In TIME, TIME moves to page 2 D and LOOP (G) sets where the wave loop starts, so PLAY and LOOP work as for the sample. ROOT moves to page 1 F, in the slot Digi Poly's unused kit marker held; older kits read it as AUTO.

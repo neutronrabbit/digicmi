@@ -159,6 +159,12 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
     tap(20, 20, 150); at(250, "snap", "q0_src_page")
     tap(20, 20, 150); at(250, "snap", "q0_src_page2")
     PAGES_END = t + 2                           # DIGICMI_PAGES_ONLY: stop here, no playback or sound checks
+    if os.environ.get("DIGICMI_REDRAWTEST"):    # frames drawn: page 2 with a held note, then the TRIG page, note still held
+        tap(20, 20, 150)
+        at(1, "press", 24); at(60, "frames", "page 2, note held"); at(400, "frames", None)
+        tap(19, 20, 60); at(0, "frames", "TRIG page, note held"); at(400, "frames", None); at(5, "release", 24)
+        at(0, "frames", "TRIG page, no note"); at(300, "frames", None)
+        PAGES_END = t + 2
     if os.environ.get("DIGICMI_TIMESHOT"):      # page 2: G turned, the label place over time
         tap(20, 20, 150); at(100, "snap", "q5_page2")
         for _ in range(3):
@@ -297,6 +303,11 @@ def spin(m, pc, *args, **kw):
             st = (snd - kit - 0x20) // 0xa2 if snd else v
             starts.setdefault(ph, []).append((state["n"], v, note, mid, st))
         uc.hook_add(UC_HOOK_CODE, vstart, begin=VOICE_START, end=VOICE_START)
+        if os.environ.get("DIGICMI_REDRAWTEST") and "digicmi_wave_draw" in MAP:
+            def frame_(u, ad, s_, d):
+                if state.get("fr_on"):
+                    state["frames"][state["fr_on"]][0] += 1
+            uc.hook_add(UC_HOOK_CODE, frame_, begin=MAP["digicmi_wave_draw"], end=MAP["digicmi_wave_draw"])
         if os.environ.get("DIGICMI_LRTEST"):
             from unicorn import UC_HOOK_MEM_WRITE
             def aw(u, acc_, ad, sz, val, d):
@@ -514,6 +525,13 @@ def spin(m, pc, *args, **kw):
         elif k == "slots8bit":
             log.append("8BIT/ENG slots (50, 51) %s: %s" % (act[1], [hex(x & 0xffff) for x in
                        struct.unpack(">2h", uc.mem_read(kit + 0x20 + 0x14 + 2 * 50, 4))]))
+        elif k == "frames":
+            state["fr_on"] = act[1]
+            if act[1]:
+                state.setdefault("frames", {})[act[1]] = [0, state["n"]]
+            elif state.get("fr_last"):
+                state["frames"][state["fr_last"]][1] = state["n"] - state["frames"][state["fr_last"]][1]
+            state["fr_last"] = act[1] or state.get("fr_last")
         elif k == "lr":
             state["lr_on"] = act[1]
             if act[1]:
@@ -1020,6 +1038,9 @@ if "digicmi_steal" in MAP:
     if not st:
         fails.append("no steal ran, so the quietest-voice rule was not exercised")
 
+if state.get("frames"):
+    for k, (n_, steps_) in state["frames"].items():
+        print("frames %s: %d in %d steps" % (k, n_, steps_))
 if state.get("fpos"):
     for k, xs in state["fpos"].items():
         xs = [x / 65536 for x in xs]
