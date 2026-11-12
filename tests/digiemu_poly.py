@@ -533,7 +533,15 @@ def spin(m, pc, *args, **kw):
             if os.environ.get("DIGICMI_LOOPPROBE"):
                 import math
                 n = TEST_LEN
-                pcm = b"".join(struct.pack(">h", int(12000 * math.sin(2 * math.pi * 440 * i / 48000))) for i in range(n))
+                hz_ = float(os.environ.get("DIGICMI_TESTHZ", "440"))          # the test sample: sine, saw or noise
+                wave_ = os.environ.get("DIGICMI_TESTWAVE", "sine")
+                if wave_ == "saw":
+                    vals_ = [12000 * (2 * ((i * hz_ / 48000) % 1.0) - 1) for i in range(n)]
+                elif wave_ == "noise":
+                    import random; random.seed(1); vals_ = [random.uniform(-12000, 12000) for i in range(n)]
+                else:
+                    vals_ = [12000 * math.sin(2 * math.pi * hz_ * i / 48000) for i in range(n)]
+                pcm = b"".join(struct.pack(">h", int(x)) for x in vals_)
                 if os.environ.get("DIGICMI_REGIONS"):
                     for r0, r1, pr in uc.mem_regions():
                         log.append("region 0x%08x-0x%08x %d" % (r0, r1, pr))

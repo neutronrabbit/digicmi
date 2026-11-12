@@ -199,6 +199,14 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Checked in digiemu: page shots, pitch 262 Hz and level unchanged with SMEAR 40 / BLND 64. SMEAR's and BLND's sound not measurable with the steady test sine; full regression not rerun. Build `build/digicmi-0.18.syx` (CM18).
 - Test: `DIGICMI_TIMESHOT=1` (with SRCSHOT, PAGES_ONLY) turns G on page 2 and snaps the label place over time; `DIGICMI_LMOD` / `DIGICMI_LLEN` set slots 47 / 46 (SMEAR / BLND).
 
+## ROOT and pitch detection for TIME (0.19)
+
+- `timesynth.c` `detect()`: YIN-style cumulative-mean-normalised difference over the middle of STRT..END, at half rate (window 256, lags 20-512 = 1200-47 Hz), first dip below 0.15 (else the minimum if < 0.5, else none), refined at full rate +-2 samples with a parabola. Integer only, once per sample/STRT/LEN/ROOT change in the UI tick. No clear period -> C3.
+- **ROOT** = page 2 D in TIME mode (LFIN's slot 49, shared): 0 AUTO, else MIDI note 23 + value (37 = C3). The cycle length is the root's period, and `root_inc` = 2^32 / period / 256, so MIDI 60 plays the sample's own pitch (as SMPL does).
+- Page: D box "A G2" (AUTO, found), "A C3?" (AUTO, none), or the set note; pop-up "AUTO G2" / "AUTO (NONE)"; lname "Loop Fine/Root". Note names Elektron style (C3 = 60).
+- Measured (digiemu, `DIGICMI_TESTWAVE=sine|saw|noise`, `DIGICMI_TESTHZ`): sine 440 -> 440.4 Hz, saw 196 -> 195.9 Hz (shown G2), ROOT C3 on the sine -> 262.3 Hz, noise -> C3 fallback. Not measured: detection cost on hardware, real recorded samples.
+- mod.json 0.19: description rewritten for SMPL/TIME, author "neutronrabbit (fork of Digi Poly 2.1 by gdeo607 / digi1_mods, MIT)". Build `build/digicmi-0.19.syx` (CM19).
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.
@@ -245,7 +253,7 @@ ghidra-projects/
 
 - `digicmi/` is a git repo (branch `main`), one commit per version tagged `v0.1`...`v0.18`, then repo docs. Earlier versions were reconstructed by replaying the development session and checked against each `.elemod`'s `build.sources` hashes (0.11 by rebuilding the flashed .syx byte-for-byte; 0.4/0.5 match in compiled code only, `cmi_page.c` comment text differs).
 - For each new version: bump `mod.json`, build, test, then commit and tag `vX.Y`, and add a CHANGELOG entry. Never commit `.syx`/`.elemod` files or anything from the stock OS (`.gitignore`).
-- Modwerk (modwerk.app) takes Digitakt mods as released `.elemod` files via a PR to repeat98/modwerk (`sdk/digitakt/modules/<id>/`, owner review, hardware evidence, real LCD captures, 320x192 SVG thumbnail, changelog JSON). The elekloader shop is a separate route (Submit a mod issue form). Before releasing: update `mod.json`'s description (still describes the spectral engine) and author.
+- Modwerk (modwerk.app) takes Digitakt mods as released `.elemod` files via a PR to repeat98/modwerk (`sdk/digitakt/modules/<id>/`, owner review, hardware evidence, real LCD captures, 320x192 SVG thumbnail, changelog JSON). The elekloader shop is a separate route (Submit a mod issue form). (0.19 fixed mod.json's description and author.) Identity in anything public: the handle neutronrabbit and its no-reply email only.
 
 ## Key references
 

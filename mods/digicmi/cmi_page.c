@@ -11,7 +11,7 @@
  * are machine-pages' extra values in slots 46-51 (p-locks, LFOs, copy/paste, the project save):
  *   (LLEN, extra 8 / slot 46: on no page since 0.13; the loop runs from LOOP to END)
  *   LMOD  (with ENG = TIME: SMEAR, timesynth.c) HOLD (loops on after release) or SUS (loops while held, then plays on to the end, or the start)
- *   LFIN  fine loop start: one LOOP step divided into 128
+ *   LFIN  fine loop start: one LOOP step divided into 128 (with ENG = TIME: ROOT, 0 AUTO or a MIDI note)
  *   RETRO a switch: the sample as a CMI Series I voice plays it: 8 bits at 24 kHz, its clock following the
  *         note's pitch (cmi_loop.c, digicmi_render)
  *   ENG   a switch: SMPL, or TIME (the time synth, timesynth.c: single cycles cut from the sample, played in turn)
@@ -87,6 +87,40 @@ static int32_t fmt_sprd(char *buf, int32_t v, int32_t ctx, int32_t m)
         put_s(buf, ctx ? "OFF (CENTRED)" : "OFF");
     else
         put_u(buf, (unsigned)v);
+    return 1;
+}
+
+int digicmi_ts_root(int *is_auto, int *found);     /* timesynth.c: the root note in use */
+
+/* A MIDI note as Elektron names it (C3 = 60): C, C#, ... and the octave */
+static char *put_note(char *b, int n)
+{
+    static const char nm[12][3] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    b = put_s(b, nm[n % 12]);
+    return put_u(b, (unsigned)(n / 12 - 2));
+}
+
+/* D: LFIN, or with ENG = TIME the time synth's ROOT: 0 AUTO (with the note found), else MIDI note 23 + value */
+static int32_t fmt_lfin(char *buf, int32_t v, int32_t ctx, int32_t m)
+{
+    int au, fd, n;
+    (void)m;
+    v = (v >> 8) & 127;
+    if (!time_mode()) {
+        put_u(buf, (unsigned)v);
+        return 1;
+    }
+    if (v) {
+        put_note(buf, v + 23 > 108 ? 108 : v + 23);
+        return 1;
+    }
+    n = digicmi_ts_root(&au, &fd);
+    if (!ctx || !au)
+        put_s(buf, "AUTO");
+    else if (fd)
+        put_note(put_s(buf, "AUTO "), n);      /* "AUTO G#3": 8 */
+    else
+        put_s(buf, "AUTO (NONE)");             /* no clear pitch: C3 */
     return 1;
 }
 
@@ -349,7 +383,17 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
         vbox(bmp, 1, b, 0);
         put_u(put_s(b, "S"), (unsigned)shown.lmod);
         vbox(bmp, 2, b, !shown.lmod);
-        vbox(bmp, 3, "", 1);
+        {                                        /* D: ROOT, "A" and the note found when AUTO */
+            int au, fd, n = digicmi_ts_root(&au, &fd);
+            char *e = b;
+            if (!shown.lfin)
+                e = put_s(b, "A ");
+            if (!shown.lfin && !fd)
+                put_s(e, "C3?");
+            else
+                put_note(e, shown.lfin ? (shown.lfin + 23 > 108 ? 108 : shown.lfin + 23) : n);
+            vbox(bmp, 3, b, 0);
+        }
     } else {
         vbox(bmp, 1, "", 1);                     /* B: an empty place, as the Digitakt II draws one */
         vbox(bmp, 2, shown.lmod < 64 ? "HOLD" : "SUS", 0);
@@ -457,7 +501,7 @@ const struct cm_ui32 digicmi_page = {
         { .name = "LMOD", .lname = "Loop Mode/Smear", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 25, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_lmod, .draw = lmod_draw },
         EXTRA("SPRD", "Stereo Spread", 0, fmt_sprd, 26),     /* slot 48 (0.3-0.6's DIR): cmi_loop.c */
-        EXTRA("LFIN", "Loop Start Fine", 0, fmt_num, 27),
+        EXTRA("LFIN", "Loop Fine/Root", 0, fmt_lfin, 27),     /* TIME: ROOT (timesynth.c) */
         { .name = "RETRO", .lname = "Retro", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 28, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_retro, .draw = switch_draw },
         { .name = "ENG", .lname = "Engine", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,

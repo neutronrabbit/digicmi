@@ -3,9 +3,11 @@
  * were drawn with the light pen; here they are cut from the track's sample.
  *
  * Tables: TS_FRAMES single cycles of TS_LEN samples (Q15, one extra sample for the wrap), cut from track 1's
- * sample at evenly spaced places between STRT and END (STRT + LEN). Each cycle is one period of C3 (MIDI 60,
- * 261.63 Hz: 183.47 samples at 48 kHz), the root the sample is assumed to be at, starting at the first upward
- * zero crossing after its place and resampled to TS_LEN; a straight ramp takes out the difference between its
+ * sample at evenly spaced places between STRT and END (STRT + LEN). Each cycle is one period of the sample's
+ * root: found by pitch detection (ROOT = AUTO; a YIN-style difference function over the middle of the region,
+ * on the sample at half rate, then refined at full rate with a parabola) or set by ROOT (D, slot 49 = LFIN in
+ * sample mode: 0 AUTO, else MIDI note 23 + value). A region with no clear period falls back to C3 (183.47
+ * samples). Each cycle starts at the first upward zero crossing after its place and is resampled to TS_LEN; a straight ramp takes out the difference between its
  * two ends so it loops without a click. All frames share one scale (the loudest frame's peak to 29000), so
  * quiet parts of the sample stay quieter. The tables are rebuilt in the UI tick when the sample, STRT or LEN
  * change, into the bank the render is not reading, then switched in one store.
@@ -17,7 +19,8 @@
  * Per track (track 1's sound, in the tables):
  *   C, slot 47 (0-127)    SMEAR (LMOD in sample mode): each wave mixed with its neighbours, a triangle up to
  *                         15 waves either side wide, for a washed tone; 0 off
- * The voice's pitch is its stock player's: while ENG = TIME the player loops the track's sample silently
+ * The root plays at its own pitch on MIDI 60, as the sample does in sample mode. The voice's pitch is its stock
+ * player's: while ENG = TIME the player loops the track's sample silently
  * (cmi_loop.c) and its playhead's move per block is the pitch ratio, TUNE, bends and LFOs in. The block it
  * writes is scaled as the sample's would be (gain x 0.81), so the AMP envelope, filter, pan, RETRO and SPREAD
  * act on it as on a sample. */
@@ -28,8 +31,7 @@ typedef unsigned int u32;
 #define TS_FRAMES  16
 #define TS_LEN     256
 #define LAST_FRAME ((TS_FRAMES - 1) << 16)
-#define ROOT_INC   91443u                           /* 261.6256 Hz / 48 kHz x 2^32, / 256 */
-#define CYCLE      12023779u                        /* 48000 / 261.6256 samples, 16.16 */
+#define CYCLE      12023779u                        /* C3: 48000 / 261.6256 samples, 16.16 */
 #define FULL       0x7800                           /* 120.0: STRT and LEN's scale */
 #ifdef OS154
 #define SMP_TAB    0x4031a3a0u
@@ -42,7 +44,10 @@ static short raw[TS_FRAMES][TS_LEN + 1];           /* the cut waves, before SMEA
 static volatile int bank = -1;                      /* the bank the render reads; -1 none built yet */
 static const short *built_pcm;
 static u32 built_len;
-static int built_strt = -1, built_lenv = -1, built_smear = -1;
+static int built_strt = -1, built_lenv = -1, built_smear = -1, built_root = -1;
+static u32 cycle_fix = CYCLE;                       /* the root's period, 16.16 samples */
+static volatile u32 root_inc = 91443u;              /* the phase step for the root at MIDI 60: 2^32 / period / 256 */
+static int root_note = 60, root_auto = 1, root_found;   /* for the page: the note in use, AUTO?, detected? */
 
 static const unsigned short exp2n[17] = {           /* 2^(-i/16), Q15 */
     32768, 31379, 30048, 28774, 27554, 26386, 25268, 24196, 23170, 22188, 21247, 20347,
@@ -57,16 +62,140 @@ static u32 scale(u32 val, u32 len)                  /* val / 120.0 of len, witho
 /* The sample at st + n / TS_LEN of a cycle, linearly interpolated. */
 static int at(const short *pcm, u32 st, u32 n)
 {
-    u32 off = n * (CYCLE / TS_LEN);                 /* 16.16 */
+    u32 off = n * (cycle_fix / TS_LEN);             /* 16.16 */
     u32 i = st + (off >> 16);
     int a = pcm[i], b = pcm[i + 1];
     return a + ((b - a) * (int)((off & 0xffff) >> 1) >> 15);
 }
 
-static void cut(const short *pcm, u32 len, int strt, int lenv)
+/* ---- the root ---- */
+static const unsigned semis[12] = {                 /* 2^(k/12), Q16 */
+    65536, 69433, 73562, 77936, 82570, 87480, 92682, 98193, 104032, 110218, 116772, 123715
+};
+
+static u32 cycle_of_note(int n)                     /* MIDI note n's period at 48 kHz, 16.16 */
 {
-    u32 st[TS_FRAMES], s0, se, span, need = (CYCLE >> 16) + 3;
+    int d = 60 - n, oct = d >= 0 ? d / 12 : -((11 - d) / 12), k = d - 12 * oct;
+    u32 c = ((CYCLE >> 8) * (semis[k] >> 4)) >> 4;  /* no overflow: 46967 x 7732 */
+    return oct >= 0 ? c << oct : c >> -oct;
+}
+
+static int note_of_cycle(u32 c)                     /* the nearest MIDI note (24-108) to a period */
+{
+    int n, best = 60;
+    u32 bd = 0xffffffffu, a = c >> 8;
+    for (n = 24; n <= 108; n++) {
+        u32 b = cycle_of_note(n) >> 8, r = a > b ? a * 1000u / b : b * 1000u / a;
+        if (r < bd) {
+            bd = r;
+            best = n;
+        }
+    }
+    return best;
+}
+
+#define DW    256                                   /* the detector's window, half-rate samples */
+#define DMAX  512                                   /* its longest lag (half rate): 46.9 Hz */
+#define DMIN  20                                    /* its shortest: 1200 Hz */
+static short dx[DW + DMAX + 1];
+static u32 dd[DMAX + 1];
+
+static u32 diff_full(const short *pcm, u32 a, u32 t)   /* the difference function at full rate, lag t */
+{
+    u32 i, sum = 0;
+    for (i = 0; i < 2 * DW; i++) {
+        int e = (pcm[a + i] >> 6) - (pcm[a + i + t] >> 6);
+        sum += (u32)(e * e);
+    }
+    return sum;
+}
+
+/* The period of the sample between s0 and se, 16.16 samples, or 0 when it has no clear one. */
+static u32 detect(const short *pcm, u32 len, u32 s0, u32 se)
+{
+    u32 avail = se > s0 ? se - s0 : 0, lmax, a, k, t, sum = 0, best = 0, bestv = 0xffffffffu, energy = 0;
+    u32 dm, d0, dp, t2;
+    int off;
+    if (avail < 2 * (DW + 2 * DMIN) + 8)
+        return 0;
+    lmax = (avail - 8) / 2 - DW;
+    lmax = lmax > DMAX ? DMAX : lmax;
+    a = s0 + avail / 2 - (DW + lmax);               /* the window and its lags, centred in the region */
+    if (a + 2 * (DW + lmax) + 8 > len)
+        return 0;
+    for (k = 0; k <= DW + lmax; k++) {
+        dx[k] = (short)((pcm[a + 2 * k] + pcm[a + 2 * k + 1]) >> 7);
+        if (k < DW)
+            energy += (u32)(dx[k] * dx[k]);
+    }
+    if (energy < DW * 4)                            /* silence */
+        return 0;
+    for (t = 1; t <= lmax; t++) {                   /* the cumulative-mean-normalised difference, Q8 */
+        u32 d = 0, dsh;
+        for (k = 0; k < DW; k++) {
+            int e = dx[k] - dx[k + t];
+            d += (u32)(e * e);
+        }
+        dsh = d >> 8;
+        sum += dsh;
+        dd[t] = dsh * t / ((sum >> 8) + 1);
+    }
+    for (t = DMIN; t <= lmax; t++) {                /* the first dip below 0.15, to its bottom */
+        if (dd[t] < 38) {
+            while (t < lmax && dd[t + 1] < dd[t])
+                t++;
+            best = t;
+            break;
+        }
+        if (dd[t] < bestv) {
+            bestv = dd[t];
+            best = t;
+        }
+    }
+    if (!best || (dd[best] >= 38 && bestv > 128))   /* nothing below 0.5: no clear period */
+        return 0;
+    /* refined at full rate: the lowest of 2 best - 2 .. 2 best + 2, then a parabola through it */
+    t2 = 2 * best;
+    if (t2 < 4 || a + 4 * DW + t2 + 4 > len)
+        return t2 << 16;
+    bestv = 0xffffffffu;
+    for (t = t2 - 2; t <= t2 + 2; t++) {
+        u32 d = diff_full(pcm, a, t);
+        if (d < bestv) {
+            bestv = d;
+            best = t;
+        }
+    }
+    dm = diff_full(pcm, a, best - 1) >> 8;
+    d0 = bestv >> 8;
+    dp = diff_full(pcm, a, best + 1) >> 8;
+    off = 0;
+    if (dm + dp > 2 * d0)
+        off = (int)(((int)dm - (int)dp) * 128) / (int)(dm + dp - 2 * d0);   /* Q8, +-0.5 */
+    off = off > 128 ? 128 : off < -128 ? -128 : off;
+    return (best << 16) + (u32)(off * 256);
+}
+
+static void cut(const short *pcm, u32 len, int strt, int lenv, int root)
+{
+    u32 st[TS_FRAMES], s0, se, span, need;
     int f, n, peak = 1, drift[TS_FRAMES];
+    cycle_fix = CYCLE;
+    root_found = 0;
+    if (pcm && len > 1024) {
+        s0 = scale((u32)strt, len);
+        se = scale((u32)(strt + lenv > FULL ? FULL : strt + lenv), len);
+        if (root) {                                 /* ROOT set: that note's period */
+            cycle_fix = cycle_of_note(root);
+            root_found = 1;
+        } else if ((cycle_fix = detect(pcm, len, s0, se < len ? se : len)) != 0)
+            root_found = 1;
+        else
+            cycle_fix = CYCLE;                      /* no clear period: C3 */
+    }
+    root_note = note_of_cycle(cycle_fix);
+    root_auto = !root;
+    need = (cycle_fix >> 16) + 3;
     if (!pcm || len < need + 2) {                   /* no sample: silence */
         for (f = 0; f < TS_FRAMES; f++)
             for (n = 0; n <= TS_LEN; n++)
@@ -82,7 +211,7 @@ static void cut(const short *pcm, u32 len, int strt, int lenv)
     span = se > s0 + need ? se - s0 - need : 0;
     for (f = 0; f < TS_FRAMES; f++) {
         u32 c = s0 + span / (TS_FRAMES - 1) * (u32)f + (span % (TS_FRAMES - 1)) * (u32)f / (TS_FRAMES - 1), i;
-        u32 lim = c + (CYCLE >> 16);
+        u32 lim = c + (cycle_fix >> 16);
         st[f] = c;
         if (lim > len - need)
             lim = len - need;
@@ -146,7 +275,7 @@ void digicmi_ts_tick(void)
     const volatile u32 *e;
     const short *pcm;
     u32 len;
-    int strt, lenv, smear;
+    int strt, lenv, smear, root;
     if (!kit)
         return;
     snd = FW_SOUND(kit, 0);
@@ -157,6 +286,8 @@ void digicmi_ts_tick(void)
     strt = W(21);
     lenv = W(22);
     smear = (W(47) >> 8) & 127;
+    root = (W(49) >> 8) & 127;                      /* ROOT: 0 AUTO, else MIDI note 23 + value */
+    root = root ? (root + 23 > 108 ? 108 : root + 23) : 0;
 #undef W
     strt = strt < 0 ? 0 : strt > FULL ? FULL : strt;
     lenv = lenv < 0 ? 0 : lenv > FULL ? FULL : lenv;
@@ -165,17 +296,28 @@ void digicmi_ts_tick(void)
     if ((u32)pcm < 0x40000000u || len <= 248u)      /* the slots' silent dummy */
         pcm = 0;
     if (bank >= 0 && pcm == built_pcm && len == built_len && strt == built_strt && lenv == built_lenv
-        && smear == built_smear)
+        && smear == built_smear && root == built_root)
         return;
-    if (bank < 0 || pcm != built_pcm || len != built_len || strt != built_strt || lenv != built_lenv)
-        cut(pcm, len, strt, lenv);
+    if (bank < 0 || pcm != built_pcm || len != built_len || strt != built_strt || lenv != built_lenv
+        || root != built_root)
+        cut(pcm, len, strt, lenv, root);
     smear_into(bank == 0 ? 1 : 0, smear);
+    root_inc = 0xffffffffu / (cycle_fix >> 8);      /* 2^32 / period / 256: the root plays at its own pitch */
     bank = bank == 0 ? 1 : 0;
     built_pcm = pcm;
     built_len = len;
     built_strt = strt;
     built_lenv = lenv;
     built_smear = smear;
+    built_root = root;
+}
+
+/* For the page: the root note in use (MIDI), whether ROOT is AUTO, and whether a period was found or set. */
+int digicmi_ts_root(int *is_auto, int *found)
+{
+    *is_auto = root_auto;
+    *found = root_found;
+    return root_note;
 }
 
 /* ---- the voices ---- */
@@ -214,7 +356,7 @@ void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, in
         fpos[v] = fdir[v] < 0 ? LAST_FRAME : 0;
     } else if (adv > 0 && adv < 4096)
         rate[v] = adv << 11;                        /* adv / 32 output samples, 16.16 */
-    inc = ROOT_INC * (u32)(rate[v] >> 8);
+    inc = root_inc * (u32)(rate[v] >> 8);
 
     /* the pass, once a block: a whole one takes 75 x 2^(G/15) blocks */
     time = time < 0 ? 0 : time > 120 ? 120 : time;

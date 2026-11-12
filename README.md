@@ -23,7 +23,9 @@ early CMI voice did, stereo spread and a time synth that builds a moving wavetab
 - **RETRO**: 8 bits at 24 kHz with the CMI Series I's rate character (each voice's clock follows its pitch).
 - **SPRD**: stereo spread; at 127 notes alternate hard left and hard right.
 - **ENG = TIME**: a time-domain wavetable synth. Sixteen single cycles are cut from the sample between STRT
-  and END and played in turn while the note sounds, stepped or crossfaded, optionally smeared together.
+  and END and played in turn while the note sounds, stepped or crossfaded, optionally smeared together. The
+  sample's pitch is detected automatically (or set with ROOT), so each cut is exactly one cycle and the root
+  plays at the sample's own pitch, as in sample mode.
 - A Digitakt II-style **waveform page** (page 2) with dotted markers and a playhead arrow for each sounding note.
 
 ## Controls
@@ -58,6 +60,7 @@ Page 2 with ENG = TIME:
 | A | PLAY | Order of the 16 waves: FWD and REV once, FWD.L and REV.L repeating, P back and forth |
 | B | BLND | 0 steps from wave to wave (CMI segments); 127 crossfades all the way |
 | C | SMEAR | Mixes each wave with its neighbours, up to all of them; 0 off (shares LMOD's value) |
+| D | ROOT | AUTO (default) finds the sample's pitch and shows it ("A G2"; "A C3?" when it finds none and uses C3), or set a note (shares LFIN's value) |
 | E, F | STRT, LEN | The part of the sample the waves are cut from |
 | G | TIME | Time of one pass through the waves, 0.05 s to about 13 s (shown in seconds while turning) |
 | H | LEV | Level |
@@ -81,7 +84,10 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, LFIN 27, RETRO 28, ENG 29. The other knobs
 - Needs elekloader's **core** (built with 4.3) and **machine-pages** (1.10).
 - **Conflicts** (same patch sites or sound slots): Digi Poly, dt8poly, DIGISLICER, Digi EQ, Digi Matrix.
 - CMI can only be chosen on track 1 and uses all eight tracks as voices while it is there.
-- The sample (and the time synth's cycle length) assumes a root of C3; there is no root-note setting.
+- In sample mode the sample plays unpitched on C3 (MIDI 60), as stock; use TUNE to correct a sample recorded at another pitch.
+- TIME's pitch detection suits pitched, steady sounds. Drums, noise, bells and sounds with vibrato or glides can be
+  detected an octave out or not at all (then C3 is used): set ROOT by hand for those.
+- TIME scales its waves to near full level, so a quiet sample plays louder in TIME than in SMPL.
 - SMEAR is set per track (from track 1's value) and acts when the knob moves; p-locks and LFOs don't change it per note.
 - Kits saved with CMI load that track as ONESHOT on the stock OS.
 
@@ -93,11 +99,12 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
-- TIME: plays at 262 Hz for C3 (183-sample period) at a level close to the sample's.
+- TIME pitch detection (0.19): a 440 Hz sine and a 196 Hz saw are found and play at 440.4 / 195.9 Hz on MIDI 60;
+  ROOT = C3 forces 262.3 Hz; noise finds no pitch and falls back to C3.
 - Voice stealing always takes the quietest eligible voice; every voice gets its own note's velocity.
 
 Hardware: builds up to 0.14 were run on the author's Digitakt mk1 during development, and the faults found
-there were fixed in 0.9-0.16. **0.17 and 0.18 have only been run in digiemu.** BLND and SMEAR have not been
+there were fixed in 0.9-0.16. **0.17-0.19 have only been run in digiemu.** BLND and SMEAR have not been
 checked by ear, and CPU load with eight time-synth voices has not been measured.
 
 ## Building
@@ -107,7 +114,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.18-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.19-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -132,13 +139,13 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 | ![Machine list with CMI selected](media/01-machine-menu.png) | ![Page 1](media/02-page1.png) |
 | Machine list, CMI selected on track 1 (0.10; unchanged since) | Page 1: TUNE, RETRO, ENG, SAMP / SPRD, LEV (0.18) |
 | ![Page 2, sample](media/03-page2-sample.png) | ![Page 2, time synth](media/04-page2-time.png) |
-| Page 2, FWD.L loop, a note's playhead arrow (0.18) | Page 2 with ENG = TIME: BLND, SMEAR, the 16 waves' places (0.18) |
+| Page 2, FWD.L loop, a note's playhead arrow (0.18) | Page 2 with ENG = TIME on a 196 Hz saw: BLND, SMEAR, ROOT found as G2, the 16 waves' places (0.19) |
 | ![TIME readout](media/05-page2-time-turning.png) | |
 | G turning in TIME mode: the pass time in seconds (0.18) | |
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.18`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.19`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

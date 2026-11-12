@@ -1,6 +1,10 @@
 # Changelog
 
-Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17 and 0.18 only in digiemu.
+Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 ran on the author's unit; 0.17-0.19 only in digiemu.
+
+## 0.19 (2026-11-12): time synth ROOT with pitch detection
+
+TIME now finds the sample's pitch (ROOT = AUTO) or takes it from ROOT (page 2 D), so each wave is exactly one cycle and the root plays at the sample's own pitch. mod.json's description and author are brought up to date.
 
 ## 0.18 (2026-11-12): BLND curve, SMEAR, TIME readout
 
