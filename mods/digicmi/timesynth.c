@@ -12,7 +12,11 @@
  * Per voice (cmi_loop.c's digicmi_render calls ts_voice), from the voice's own smoothed values:
  *   A, slot 18 (PLAY 0-4) the order: 3 FWD once, 0 REV once, 2 FWD.L loop, 1 REV.L loop, 4 P ping-pong
  *   G, slot 23 (0-120)    TIME of a whole pass: 0.05 s x 2^(G/15), to about 13 s
- *   B, slot 46 (0-127)    BLND: 0 steps from wave to wave (the CMI's segments), 127 crossfades all the way
+ *   B, slot 46 (0-127)    BLND: 0 steps from wave to wave (the CMI's segments), 127 crossfades all the way;
+ *                         curved (cube), as the ear only hears the joins while a crossfade is a few ms long
+ * Per track (track 1's sound, in the tables):
+ *   C, slot 47 (0-127)    SMEAR (LMOD in sample mode): each wave mixed with its neighbours, a triangle up to
+ *                         15 waves either side wide, for a washed tone; 0 off
  * The voice's pitch is its stock player's: while ENG = TIME the player loops the track's sample silently
  * (cmi_loop.c) and its playhead's move per block is the pitch ratio, TUNE, bends and LFOs in. The block it
  * writes is scaled as the sample's would be (gain x 0.81), so the AMP envelope, filter, pan, RETRO and SPREAD
@@ -34,10 +38,11 @@ typedef unsigned int u32;
 #endif
 
 static short tab[2][TS_FRAMES][TS_LEN + 1];
+static short raw[TS_FRAMES][TS_LEN + 1];           /* the cut waves, before SMEAR */
 static volatile int bank = -1;                      /* the bank the render reads; -1 none built yet */
 static const short *built_pcm;
 static u32 built_len;
-static int built_strt = -1, built_lenv = -1;
+static int built_strt = -1, built_lenv = -1, built_smear = -1;
 
 static const unsigned short exp2n[17] = {           /* 2^(-i/16), Q15 */
     32768, 31379, 30048, 28774, 27554, 26386, 25268, 24196, 23170, 22188, 21247, 20347,
@@ -58,14 +63,14 @@ static int at(const short *pcm, u32 st, u32 n)
     return a + ((b - a) * (int)((off & 0xffff) >> 1) >> 15);
 }
 
-static void build(int into, const short *pcm, u32 len, int strt, int lenv)
+static void cut(const short *pcm, u32 len, int strt, int lenv)
 {
     u32 st[TS_FRAMES], s0, se, span, need = (CYCLE >> 16) + 3;
     int f, n, peak = 1, drift[TS_FRAMES];
     if (!pcm || len < need + 2) {                   /* no sample: silence */
         for (f = 0; f < TS_FRAMES; f++)
             for (n = 0; n <= TS_LEN; n++)
-                tab[into][f][n] = 0;
+                raw[f][n] = 0;
         return;
     }
     s0 = scale((u32)strt, len);
@@ -96,7 +101,40 @@ static void build(int into, const short *pcm, u32 len, int strt, int lenv)
     }
     for (f = 0; f < TS_FRAMES; f++) {
         for (n = 0; n < TS_LEN; n++)
-            tab[into][f][n] = (short)((at(pcm, st[f], (u32)n) - drift[f] * n / TS_LEN) * 29000 / peak);
+            raw[f][n] = (short)((at(pcm, st[f], (u32)n) - drift[f] * n / TS_LEN) * 29000 / peak);
+        raw[f][TS_LEN] = raw[f][0];
+    }
+}
+
+/* The tables the voices read: raw's waves, SMEAR'd. Wave f is the weighted sum of waves f - r .. f + r (weights
+ * a triangle, r = smear x 15 / 127 in 8.8), scaled back so the loudest wave peaks at 29000 again. */
+static void smear_into(int into, int smear)
+{
+    int f, g, n, peak = 1, r = smear * 15 * 256 / 127;
+    static int acc[TS_FRAMES][TS_LEN];
+    for (f = 0; f < TS_FRAMES; f++) {
+        int wsum = 0;
+        for (n = 0; n < TS_LEN; n++)
+            acc[f][n] = 0;
+        for (g = 0; g < TS_FRAMES; g++) {
+            int d = (g > f ? g - f : f - g) << 8, w = r + 256 - d;
+            if (w <= 0)
+                continue;
+            wsum += w;
+            for (n = 0; n < TS_LEN; n++)
+                acc[f][n] += raw[g][n] * w >> 4;
+        }
+        for (n = 0; n < TS_LEN; n++) {
+            int a = acc[f][n], x;
+            x = acc[f][n] = (a / wsum << 4) + (a % wsum << 4) / wsum;   /* no 64-bit sums */
+            x = x < 0 ? -x : x;
+            if (x > peak)
+                peak = x;
+        }
+    }
+    for (f = 0; f < TS_FRAMES; f++) {
+        for (n = 0; n < TS_LEN; n++)
+            tab[into][f][n] = (short)(acc[f][n] * 29000 / peak);
         tab[into][f][TS_LEN] = tab[into][f][0];
     }
 }
@@ -108,7 +146,7 @@ void digicmi_ts_tick(void)
     const volatile u32 *e;
     const short *pcm;
     u32 len;
-    int strt, lenv;
+    int strt, lenv, smear;
     if (!kit)
         return;
     snd = FW_SOUND(kit, 0);
@@ -118,6 +156,7 @@ void digicmi_ts_tick(void)
     e = (const volatile u32 *)(SMP_TAB + 16u * (u32)((W(20) >> 8) & 255));
     strt = W(21);
     lenv = W(22);
+    smear = (W(47) >> 8) & 127;
 #undef W
     strt = strt < 0 ? 0 : strt > FULL ? FULL : strt;
     lenv = lenv < 0 ? 0 : lenv > FULL ? FULL : lenv;
@@ -125,14 +164,18 @@ void digicmi_ts_tick(void)
     len = e[2];
     if ((u32)pcm < 0x40000000u || len <= 248u)      /* the slots' silent dummy */
         pcm = 0;
-    if (bank >= 0 && pcm == built_pcm && len == built_len && strt == built_strt && lenv == built_lenv)
+    if (bank >= 0 && pcm == built_pcm && len == built_len && strt == built_strt && lenv == built_lenv
+        && smear == built_smear)
         return;
-    build(bank == 0 ? 1 : 0, pcm, len, strt, lenv);
+    if (bank < 0 || pcm != built_pcm || len != built_len || strt != built_strt || lenv != built_lenv)
+        cut(pcm, len, strt, lenv);
+    smear_into(bank == 0 ? 1 : 0, smear);
     bank = bank == 0 ? 1 : 0;
     built_pcm = pcm;
     built_len = len;
     built_strt = strt;
     built_lenv = lenv;
+    built_smear = smear;
 }
 
 /* ---- the voices ---- */
@@ -202,7 +245,7 @@ void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, in
     f1 = f0 < TS_FRAMES - 1 ? f0 + 1 : f0;
     ff = (fpos[v] & 0xffff) >> 1;                   /* 15 bits */
     blend = blend < 0 ? 0 : blend > 127 ? 127 : blend;
-    width = blend * 32768 / 127;                    /* the crossfade's share of the way between two waves */
+    width = blend * blend * blend / 63 * 32768 / 32513;   /* the crossfade's share between two waves: (B/127)^3 */
     if (width <= 0)
         ff = ff >= 16384 ? 32768 : 0;
     else if (width < 32768) {
