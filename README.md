@@ -50,6 +50,7 @@ Page 2 (press SRC again), with ENG = SMPL:
 | Knob | Name | What it does |
 |---|---|---|
 | A | PLAY | REV, REV.L, FWD.L, FWD, P (ping-pong loop) |
+| B, D | — | Empty: they are the time synth's BLND and TIME, and don't change in sample mode |
 | C | LMOD | HOLD: loop for as long as the voice sounds; the AMP release fades it. SUS: loop while the note is held, then play the sample's tail past END to its own end (REV.L: past STRT to its start); with END at the sample's end there is no tail, so it keeps looping and the AMP release fades it |
 | E | STRT | Sample start |
 | F | LEN | Sample length (END = STRT + LEN) |
@@ -102,7 +103,8 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29, LEND 30. Level 
   one engine carries over when you switch ENG.
 - TIME keeps the sample's own level (0.33); it can still sound fuller than the sample, as its waves loop at a
   steady level where a sample usually decays.
-- Page 2's BLND, SMEAR and TIME boxes show their names, and their value while it changes.
+- Page 2's BLND, SMEAR and TIME boxes show their names, and their value while it changes. In sample mode, turning
+  B or D changes nothing; its pop-up shows only "=" (the firmware writes "name=value" and both are empty).
 - Loop points snap to a zero crossing within 256 samples of where LOOP and END put them; in silence or DC they
   stay where they are.
 - Projects saved with 0.14-0.22's RETRO switch on open with the dial at its last step, 8 bit 8 kHz.
@@ -159,7 +161,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.33-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.34-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -184,11 +186,11 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 | ![Machine list with CMI selected](media/01-machine-menu.png) | ![Page 1](media/02-page1.png) |
 | Machine list, CMI selected on track 1 (0.10; unchanged since) | Page 1: TUNE, RETRO (a dial), ENG, SAMP / SPRD, LEV; the title bar's CPU meter reads "--%" in the emulator (0.23) |
 | ![Page 2, sample](media/03-page2-sample.png) | ![Page 2, time synth](media/04-page2-time.png) |
-| Page 2, FWD.L loop with LOOP END, the held note's playhead arrow (0.31) | Page 2 with ENG = TIME on a 196 Hz saw: BLND, SMEAR, TIME, the 16 waves' places, LOOP and LOOP END (0.31) |
+| Page 2 in sample mode: PLAY, LMOD / STRT, LEN, LOOP, LOOP END (0.34) | Page 2 with ENG = TIME on a 196 Hz saw: BLND, SMEAR, TIME, the 16 waves' places, LOOP and LOOP END (0.31) |
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.33`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.34`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

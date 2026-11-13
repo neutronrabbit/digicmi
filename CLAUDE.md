@@ -320,6 +320,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - timesynth.c `cut()` keeps the cycles at the sample's level (clamped to s16, `raw_peak` = their peak); `smear_into` rescales to `raw_peak` instead of 29000. Measured on the 440 Hz test sine: TIME 469,034 vs SMPL 469,968 average output (0.32: up to ~2x).
 - cmi_page.c: BLND / SMEAR / TIME boxes show "BLND", "SMEAR", "TIME", and the value (seconds for TIME) for VAL_TICKS = 45 UI ticks after it changes (`*_age`, `last_*`; the page tick asks for one frame when the time is up). The 0.18-0.32 "B"/"S" prefixes read as 8 and 5 in font5. Test: `DIGICMI_BOXTURN=1` with TIMESHOT turns B and snaps.
 
+## Sample page 2 without the time synth's controls (0.34)
+
+- cmi_page.c: no B/D boxes in sample mode; `fmt_blnd` / `fmt_time` give "" there. B/C/D's lnames are static char buffers (`lname_b/c/d`) rewritten by `names_follow_engine()` in the page tick (machine-pages' `mp_label` returns k->lname at each pop-up): sample "", "Loop Mode", ""; time "Wave Blend", "Smear", "Wave Pass Time".
+- poly.c `digipoly_setparam`: slots 46/49 on a CMI sound with ENG (slot 51) < 96 keep their value (written back to both kits).
+- A knob's fmt can't hide its pop-up: returning 0 falls back to the firmware's text (pages.c `mp_pop_text`), so B/D show "=" (empty name and value).
+- Checked (`DIGICMI_BDTURN=1` with TIMESHOT): sample B/D values unchanged, C changes; time all three change; pop-ups "=" / "Smear=45".
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

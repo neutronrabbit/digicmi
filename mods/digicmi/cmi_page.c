@@ -180,11 +180,23 @@ static char *put_secs(char *buf, unsigned g)
     return b;
 }
 
+/* B and D are the time synth's (BLND, TIME): in sample mode they have no box, don't move (poly.c's set_param
+ * keeps their values) and show an empty pop-up: no name (the names below follow the engine) and no value. */
+static int32_t fmt_blnd(char *buf, int32_t v, int32_t ctx, int32_t m)
+{
+    (void)ctx; (void)m;
+    if (!time_mode())
+        put_s(buf, "");
+    else
+        put_u(buf, (unsigned)((v >> 8) & 127));
+    return 1;
+}
+
 static int32_t fmt_time(char *buf, int32_t v, int32_t ctx, int32_t m)
 {
     (void)ctx; (void)m;
     if (!time_mode())
-        put_s(buf, "-");                        /* TIME only (sample mode's D is empty since 0.20) */
+        put_s(buf, "");                         /* TIME only (sample mode's D is empty since 0.20) */
     else
         put_secs(buf, ((unsigned)(v >> 8) & 127u) * 120u / 127u);
     return 1;
@@ -350,6 +362,21 @@ static void vbox(void *bmp, int k, const char *s, int dotted_frame)
  * last drawn, so the screen that followed - the sample browser, say - was redrawn 30 times a second while
  * notes sounded, and the UI felt sluggish.) */
 static int page2_live;
+/* The pop-up names of B, C and D follow the engine (machine-pages reads a knob's lname at each pop-up): in sample
+ * mode C is "Loop Mode" and B, D have none; in the time synth "Wave Blend", "Smear", "Wave Pass Time". */
+static char lname_b[16] = "", lname_c[16] = "Loop Mode", lname_d[16] = "";
+static int names_for = -1;
+
+static void names_follow_engine(void)
+{
+    int tm = time_mode();
+    if (tm == names_for)
+        return;
+    names_for = tm;
+    put_s(lname_b, tm ? "Wave Blend" : "");
+    put_s(lname_c, tm ? "Smear" : "Loop Mode");
+    put_s(lname_d, tm ? "Wave Pass Time" : "");
+}
 /* BLND and SMEAR's boxes (0.33): the name, and the number for VAL_TICKS UI ticks after the value changes (a
  * prefix letter, 0.18-0.32, read as a digit in the 3 x 5 font: S as 5, B as 8). */
 #define VAL_TICKS 45
@@ -407,6 +434,7 @@ void digicmi_page_tick(void *ctrl)
     digicmi_ts_tick();                          /* timesynth.c: the waves, when track 1's sample, STRT or LEN change */
     odd ^= 1;
     digicmi_uiticks++;
+    names_follow_engine();
     if (blnd_age < 1000 && ++blnd_age == VAL_TICKS && page2_live && ctrl)
         *((unsigned char *)ctrl + 0x20) = 1;    /* BLND's box back to its name */
     if (smear_age < 1000 && ++smear_age == VAL_TICKS && page2_live && ctrl)
@@ -483,9 +511,9 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
             put_s(b, "TIME");
         vbox(bmp, 3, b, 0);
     } else {
-        vbox(bmp, 1, "", 1);                     /* B and D: empty places, as the Digitakt II draws them */
+                                                 /* B and D: nothing (the time synth's; 0.34) */
         vbox(bmp, 2, shown.lmod < 64 ? "HOLD" : "SUS", 0);
-        vbox(bmp, 3, "", 1);
+
     }
 
     e = (const volatile uint32_t *)(SMP_TAB + 16 * (uint32_t)shown.slot);
@@ -586,11 +614,11 @@ const struct cm_ui32 digicmi_page = {
                     .min = 0, .max = 0x7802, .def = 0, .fmt = fmt_pos },
         } },
     .extra = {
-        EXTRA("BLND", "Wave Blend", 127, fmt_num, 24),      /* slot 46: the time synth's (0.3-0.12's LLEN) */
-        { .name = "LMOD", .lname = "Loop Mode/Smear", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
+        EXTRA("BLND", lname_b, 127, fmt_blnd, 24),          /* slot 46: the time synth's (0.3-0.12's LLEN) */
+        { .name = "LMOD", .lname = lname_c, .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 25, .min = 0, .max = 127 << 8, .def = 0, .fmt = fmt_lmod, .draw = lmod_draw },
         EXTRA("SPRD", "Stereo Spread", 0, fmt_sprd, 26),     /* slot 48 (0.3-0.6's DIR): cmi_loop.c */
-        EXTRA("TIME", "Wave Pass Time", 64, fmt_time, 27),   /* slot 49, TIME only (0.3-0.19's LFIN; timesynth.c) */
+        EXTRA("TIME", lname_d, 64, fmt_time, 27),   /* slot 49, TIME only (0.3-0.19's LFIN; timesynth.c) */
         EXTRA("RETRO", "Retro", 0, fmt_retro, 28),         /* slot 50: a dial of six steps (a switch 0.8-0.22) */
         { .name = "ENG", .lname = "Engine", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT | CM_DRAW,
           .cc = 29, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_eng, .draw = switch_draw },

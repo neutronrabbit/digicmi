@@ -366,6 +366,15 @@ void digipoly_setparam(int value, int voice, int slot)
         if (ui)
             *(volatile short *)(ui + 0x20 + voice * 0xa2 + 0x14 + 2 * slot) = (short)value;
     }
+    if ((slot == 46 || slot == 49) && (unsigned)voice < 8 && kit && kit[0x9e + voice * 0xa2] == POLY
+        && ((*(const short *)((const char *)kit + 0x20 + voice * 0xa2 + 0x14 + 2 * 51) >> 8) & 127) < 96) {
+        /* digicmi 0.34: BLND and TIME (B, D) are the time synth's: in sample mode a turn changes nothing */
+        unsigned char *ui = UI_KIT;
+        value = PARAMS[53 * voice + 8 + slot];
+        *(volatile short *)((char *)kit + 0x20 + voice * 0xa2 + 0x14 + 2 * slot) = (short)value;
+        if (ui)
+            *(volatile short *)(ui + 0x20 + voice * 0xa2 + 0x14 + 2 * slot) = (short)value;
+    }
     PARAMS[53 * voice + 8 + slot] = value;
     own = (u32)(kit + 0x20 + voice * 0xa2);
     if (LOADED[voice] != own)

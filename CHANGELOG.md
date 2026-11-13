@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.34 (2026-11-13): sample page 2 without the time synth's controls
+
+In sample mode, page 2's B and D (the time synth's BLND and TIME) have no box, and turning them changes nothing. Pop-up names follow the engine: in the time synth knob C says "Smear", not "Loop Mode/Smear". Known issue: turning B or D in sample mode still flashes an "=" in the title bar.
+
 ## 0.33 (2026-11-13): time synth at the sample's level; named boxes
 
 The time synth no longer turns its waves up to near full scale: they keep the sample's own level, and SMEAR keeps it too. Page 2's BLND, SMEAR and TIME boxes show their names, and their value for a moment while it changes (the S and B prefixes read as 5 and 8 in the small font).

@@ -177,6 +177,13 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
             at(4, "encoder", 7, 4)
         for d_, nm in ((10, "a"), (60, "b"), (150, "c"), (300, "d"), (600, "e")):
             at(d_, "snap", "q5_gturn_" + nm)
+        if os.environ.get("DIGICMI_BDTURN"):     # B, D then C turned on page 2; the slots' values and pop-ups
+            at(0, "slotsx", "before")
+            for enc_, nm in ((2, "b"), (4, "d"), (3, "c")):
+                for _ in range(4):
+                    at(4, "encoder", enc_, 4)
+                at(20, "snap", "q5_turn_" + nm); at(0, "slotsx", "after " + nm.upper())
+                at(60, "snap", "q5_turn_" + nm + "_pop"); at(90, "wait")
         if os.environ.get("DIGICMI_BOXTURN"):    # B (BLND) turned: its box shows the number, then the name again
             for _ in range(4):
                 at(4, "encoder", 2, -4)
@@ -663,6 +670,9 @@ def spin(m, pc, *args, **kw):
             if "fade_end" in MAP:
                 log.append("   fade_end %s, end-reached bytes %s, stage calls %s" % (list(uc.mem_read(MAP["fade_end"], 8)),
                            [uc.mem_read(0x8000EDC4 + 94 * v_ + 0x29, 1)[0] for v_ in range(8)], state.get("stagecalls")))
+        elif k == "slotsx":
+            log.append("slots 46 47 49, %s: %s" % (act[1], [hex(struct.unpack(">H", uc.mem_read(kit + 0x20 + 0x14 + 2 * sl_, 2))[0])
+                                                        for sl_ in (46, 47, 49)]))
         elif k == "frames":
             state["fr_on"] = act[1]
             if act[1]:
