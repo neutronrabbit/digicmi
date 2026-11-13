@@ -89,8 +89,9 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29. The other knobs
 - **Conflicts** (same patch sites or sound slots): Digi Poly, dt8poly, DIGISLICER, Digi EQ, Digi Matrix.
 - CMI can only be chosen on track 1 and uses all eight tracks as voices while it is there.
 - Released notes keep their voices running after they fade (the mod has no reliable reading of a voice's level
-  yet), which on the unit raised the audio load after playing. The playhead arrows and the choice of the
-  "quietest" voice use the same unreliable reading.
+  yet), which on the unit raised the audio load after playing.
+- Page 2 shows one playhead arrow: the most recent note, while it is held. When all voices are busy a new note
+  takes a voice that is off, else the oldest released note, else the oldest held sequencer note (never a held key).
 - Track 1's own sequencer trigs always play on track 1's own voice, so a trig cuts the tail of the previous trig
   there (chord notes and MIDI notes take other voices).
 - In sample mode the sample plays unpitched on C3 (MIDI 60), as stock; use TUNE to correct a sample recorded at another pitch.
@@ -144,7 +145,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.28-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.29-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -173,7 +174,7 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.28`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.29`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

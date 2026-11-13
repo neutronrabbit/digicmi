@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.29 (2026-11-13): one playhead, stealing by gate and age
+
+Page 2 shows a single playhead arrow, for the most recent note while it is held, so the page stops redrawing as soon as the note is let go. Voice stealing no longer uses the unreliable envelope level: a voice that is off first, else the oldest released note, else the oldest held sequencer note.
+
 ## 0.28 (2026-11-12): voice switch-off withdrawn
 
 0.26 and 0.27 switched a released voice off when an envelope value had faded, but that value follows the filter envelope's settings, not the sound's level, so notes that were still sounding stopped dead. The switch-off is removed; the player is 0.25's again. Known issue: released notes keep their voices running after they fade, which raised the audio load on the unit; arrows and voice stealing use the same unreliable value.

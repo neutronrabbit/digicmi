@@ -155,19 +155,21 @@ int digicmi_steal(u32 used, const char *fp, const char *rest) __attribute__((noi
 #define steal digicmi_steal                 /* a symbol of its own, so tests/digiemu_poly.py can watch it */
 int digicmi_steal(u32 used, const char *fp, const char *rest)
 {
-    int v, best = -1;
-    u32 age, oldest = 0, lvl, quietest = 0;
+    /* digicmi 0.29: by what can be trusted. A voice that is off first; else a released note (the gate: the
+     * envelope phase is 0), the one that started longest ago; else the oldest note still held by the sequencer.
+     * Voices holding a live note (OWNER 2) are never taken. (0.1-0.28 took the "quietest" by fw_amp_env's level,
+     * but that level follows the filter envelope's settings, not the sound's.) */
+    int v, best = -1, rank, best_rank = 3;
+    u32 age, oldest = 0;
     (void)fp; (void)rest;
     for (v = 0; v < 8; v++) {
         if ((used >> v) & 1 || OWNER[v] >= 2)
             continue;                           /* digicmi: pool, mutes and other tracks' trigs don't count */
-        lvl = (u32)fw_amp_env[3 * v + 1];
-        if (lvl & 0x80000000u)
-            lvl = 0u - lvl;                     /* magnitude; 0x80000000 stays the loudest */
+        rank = !*(volatile unsigned char *)(0x8000EDC4u + 94u * (u32)v + 0x28) ? 0 : fw_amp_env[3 * v] == 0 ? 1 : 2;
         age = clock - started[v];
-        if (best < 0 || lvl < quietest || (lvl == quietest && age > oldest)) {
+        if (best < 0 || rank < best_rank || (rank == best_rank && age > oldest)) {
             best = v;
-            quietest = lvl;
+            best_rank = rank;
             oldest = age;
         }
     }

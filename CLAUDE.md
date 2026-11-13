@@ -278,6 +278,11 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - **Not found yet: the real AMP envelope / a voice's audible level.** Scanned 0x41980000-0x419b0000, 0x80000000-0x80010000, 0x43990000-0x439b0000, 0x4217a000-0x4217e000 for 16/32-bit values steady while held and falling with the output after release: none (only counters that start running at release, e.g. 0x4199f240 + 20n). Needs disassembly of the render's amp stage (Ghidra) rather than scanning.
 - Still open from the unit: after playing, load 94% vs 86% at boot and UI lag; piled-up silent voices cost only +1% instructions in digiemu. Unresolved without a reliable level to switch voices off by.
 
+## One playhead; stealing by gate and age (0.29)
+
+- `digicmi_voice_pos` returns only `newest` (the voice of the latest CMI note start, set in `digicmi_render`), while it is on and its gate is held (phase != 0). Page 2's redraw requests therefore stop at release. Checked: arrow moving while held (x 94 -> 119), none after release with a long release ringing.
+- `digicmi_steal`: rank 0 voice off (V+0x28 == 0), 1 released (phase 0), 2 held by the sequencer; within a rank the oldest start. Live-held voices (OWNER 2) never. No fw_amp_env level any more. Checked: six notes took voices 0-5; overlap still both sides. The regression's "every steal took the quietest eligible voice" check is now outdated (not rerun).
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

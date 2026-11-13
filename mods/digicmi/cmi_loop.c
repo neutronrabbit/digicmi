@@ -285,11 +285,15 @@ static void retro_rate(int v, int32_t *b, int mode)
     }
 }
 
+static signed char newest = -1;                              /* the voice of the page's one playhead: the latest note */
+
 void digicmi_render(int32_t *blocks)
 {
     int v, i;
     for (v = 0; v < 8; v++) {
         int32_t *b = blocks + 32 * v;
+        if (((fw_voice_start >> v) & 1) && is_cmi(v))
+            newest = (signed char)v;                         /* the page's one playhead follows the latest note */
         if (!is_cmi(v)) {
             hold_last[v] = POS(v);
             continue;
@@ -313,15 +317,15 @@ void digicmi_render(int32_t *blocks)
     }
 }
 
-/* The page's playheads (cmi_page.c): voice v's position and its sample's length, while it is a CMI voice whose
- * AMP envelope is still above silence (a looping voice runs on after it has faded). */
+/* The page's playhead (cmi_page.c), one arrow since 0.29: the most recently started CMI note, while it is held
+ * (the gate: the envelope phase beside fw_amp_env's level is 2 in attack, 1 held, 0 released; a key down, or a
+ * trig's length). So the page stops asking for frames as soon as the note is let go, however long it rings.
+ * (0.11-0.28: an arrow for every voice whose "AMP envelope" was above silence, but that level is the filter
+ * envelope's, see above.) */
 int digicmi_voice_pos(int v, int *pos, u32 *len)
 {
-    int lvl;
-    if ((unsigned)v > 7 || !*(volatile unsigned char *)(V(v) + 0x28) || !is_cmi(v))
-        return 0;
-    lvl = fw_amp_env[3 * v + 1];                             /* negated Q31; 0 silent */
-    if (lvl > -0x100000)                                     /* the AMP envelope has (all but) finished */
+    if (v != newest || (unsigned)v > 7 || !*(volatile unsigned char *)(V(v) + 0x28) || !is_cmi(v)
+        || fw_amp_env[3 * v] == 0)
         return 0;
     *pos = POS(v);
     *len = SLEN(v);
