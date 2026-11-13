@@ -411,6 +411,11 @@ static void put_glyph(void *bmp, int x, int g)
 #define POPUP_TICKS 120                         /* measured: a pop-up lasts ~96-120 UI ticks */
 extern volatile int digicmi_param_moved;
 static int popup_hold;
+/* 0.35: B and D turned in sample mode: their pop-up ("=", no name and no value) is painted over with a plain title
+ * bar for the pop-up's life. The firmware always shows a turned knob's pop-up; ev_draw draws after it. Any other
+ * knob turned meanwhile shows its pop-up as usual. */
+extern volatile int digicmi_mute_pop;
+static int mute_hold;
 volatile int digicmi_uiticks;                   /* UI ticks, for the emulator test */
 
 static void draw_meter(void *bmp)
@@ -441,6 +446,15 @@ void digicmi_page_tick(void *ctrl)
         *((unsigned char *)ctrl + 0x20) = 1;    /* SMEAR's box back to its name */
     if (time_age < 1000 && ++time_age == VAL_TICKS && page2_live && ctrl)
         *((unsigned char *)ctrl + 0x20) = 1;    /* TIME's box back to its name */
+    if (digicmi_mute_pop) {
+        digicmi_mute_pop = 0;
+        mute_hold = POPUP_TICKS;
+        if (ctrl)
+            *((unsigned char *)ctrl + 0x20) = 1;
+    } else if (digicmi_param_moved && mute_hold) {
+        mute_hold = 0;                          /* another knob: its pop-up shows */
+    } else if (mute_hold && --mute_hold == 0 && ctrl)
+        *((unsigned char *)ctrl + 0x20) = 1;
     if (digicmi_param_moved) {
         digicmi_param_moved = 0;
         popup_hold = POPUP_TICKS;
@@ -472,6 +486,10 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     page2_live = shown.on;                       /* this frame is page 2, or another screen */
     cmi_live = shown.on || page1_drawn;
     page1_drawn = 0;
+    if (mute_hold && shown.on) {                 /* a muted pop-up: a plain title bar over it */
+        fw_fillrect(bmp, 18, 55, 127, 62, 1);
+        fw_fillrect(bmp, 18, 63, 126, 63, 1);
+    }
     if (cmi_live)
         draw_meter(bmp);
     if (!shown.on)

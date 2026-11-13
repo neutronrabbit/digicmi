@@ -327,6 +327,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - A knob's fmt can't hide its pop-up: returning 0 falls back to the firmware's text (pages.c `mp_pop_text`), so B/D show "=" (empty name and value).
 - Checked (`DIGICMI_BDTURN=1` with TIMESHOT): sample B/D values unchanged, C changes; time all three change; pop-ups "=" / "Smear=45".
 
+## SUS release loops the tail; B/D pop-ups hidden (0.35)
+
+- Reported on the unit (0.34): SUS, LOOP at 0, LOOP END ~10%, a held MIDI note released -> stops dead, the rest of the sample doesn't play (a tap fades fine). Not reproduced in digiemu (`DIGICMI_SUSREL=<steps>` holds track 1's key, releases, logs playhead, end flag, gain and the real AMP envelope): the one-shot tail played out there. Cause on the unit unknown; the release used the firmware's non-looping path (P_FWD + window to END/sample end), which ends voices.
+- 0.35 (`sus_tail`): released SUS keeps P_FWDL/P_REVL with the window on the tail: forward [LOOP END, END] with a LOOP END, else [END, sample end]; REV.L [0, LOOP]. Ends on zero crossings, cached per voice. A tail < MIN_LOOP keeps the main loop. The voice never takes the non-looping path; the AMP decay fades it, 0.30's switch-off ends it. Measured with the user's settings: playhead 672 -> 7840 after release, then 4451, 3622 (round the tail), AMP 0.99 -> 0.59, still on.
+- Loop test "sus" rewritten for this (window = the snapped tail, PLAY 2, playhead past LOOP END); passing for LEN 120 (40), LEN 90 (36), LEND 100 (36); hold passes.
+- B/D pop-ups in sample mode: `digipoly_setparam` sets `digicmi_mute_pop`; the page tick holds `mute_hold` for POPUP_TICKS (cancelled by another knob's turn) and `digicmi_wave_draw` paints the title bar black (x 18-127, y 55-63) over the "=". Checked: B and D plain, C's pop-up shows.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

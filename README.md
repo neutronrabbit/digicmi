@@ -51,7 +51,7 @@ Page 2 (press SRC again), with ENG = SMPL:
 |---|---|---|
 | A | PLAY | REV, REV.L, FWD.L, FWD, P (ping-pong loop) |
 | B, D | — | Empty: they are the time synth's BLND and TIME, and don't change in sample mode |
-| C | LMOD | HOLD: loop for as long as the voice sounds; the AMP release fades it. SUS: loop while the note is held, then play the sample's tail past END to its own end (REV.L: past STRT to its start); with END at the sample's end there is no tail, so it keeps looping and the AMP release fades it |
+| C | LMOD | HOLD: loop for as long as the voice sounds; the AMP decay fades it. SUS: loop while the note is held; on release play on through the rest of the sample, then keep looping the part after the loop (LOOP END to END, or END to the sample's end; REV.L: the part before the loop) while the AMP decay fades it |
 | E | STRT | Sample start |
 | F | LEN | Sample length (END = STRT + LEN) |
 | G | LOOP | Loop start |
@@ -104,7 +104,7 @@ CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29, LEND 30. Level 
 - TIME keeps the sample's own level (0.33); it can still sound fuller than the sample, as its waves loop at a
   steady level where a sample usually decays.
 - Page 2's BLND, SMEAR and TIME boxes show their names, and their value while it changes. In sample mode, turning
-  B or D changes nothing; its pop-up shows only "=" (the firmware writes "name=value" and both are empty).
+  B or D changes nothing and shows no pop-up (the title bar is left plain while it would show).
 - Loop points snap to a zero crossing within 256 samples of where LOOP and END put them; in silence or DC they
   stay where they are.
 - Projects saved with 0.14-0.22's RETRO switch on open with the dial at its last step, 8 bit 8 kHz.
@@ -122,6 +122,8 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
+- SUS release (0.35): LOOP at the start, LOOP END at 10%, held then released: the playhead runs on through the
+  rest of the sample, then round the part after the loop, while the AMP decay fades it (0.99 -> 0.59 over 30 steps).
 - TIME level (0.33): the same note on the 440 Hz test sine averages 469,968 (sample) and 469,034 (time synth);
   0.32 played the time synth at up to twice the sample's level.
 - RETRO cost (0.32): the 8-bit cut is applied once per held value instead of to every output sample, so about a
@@ -161,7 +163,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.34-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.35-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -190,7 +192,7 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.34`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.35`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

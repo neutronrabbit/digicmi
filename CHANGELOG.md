@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.35 (2026-11-13): SUS plays on and fades; no pop-up for unused knobs
+
+On the unit, a SUS note held then released stopped dead without playing the rest of the sample. On release, SUS now keeps the voice looping: it plays on through the rest of the sample, then loops the part after the loop while the AMP decay fades it. Turning B or D on the sample page no longer shows a pop-up.
+
 ## 0.34 (2026-11-13): sample page 2 without the time synth's controls
 
 In sample mode, page 2's B and D (the time synth's BLND and TIME) have no box, and turning them changes nothing. Pop-up names follow the engine: in the time synth knob C says "Smear", not "Loop Mode/Smear". Known issue: turning B or D in sample mode still flashes an "=" in the title bar.

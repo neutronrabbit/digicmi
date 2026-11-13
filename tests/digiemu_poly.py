@@ -206,6 +206,14 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
         at(60, "slots8bit", "ENG down, chord held"); at(0, "voices", "ENG down, chord held"); at(0, "snap", "q6_eng_down")
         at(5, "release", 24); at(200, "voices", "released +200"); at(0, "snap", "q6_after")
         PAGES_END = t + 2
+    if os.environ.get("DIGICMI_SUSREL"):        # SUS: held (the loop wraps), then released: does the tail sound?
+        at(0, "chord", (0x40, 0x40, 0x40))
+        at(1, "press", int(os.environ.get("DIGICMI_SUSKEY", "24")))
+        at(int(os.environ["DIGICMI_SUSREL"]), "voices", "held")
+        at(1, "release", int(os.environ.get("DIGICMI_SUSKEY", "24")))
+        for d_ in (1, 2, 3, 5, 8, 12, 20, 30):
+            at(d_, "voices", "released +%d" % d_)
+        PAGES_END = t + 2
     if os.environ.get("DIGICMI_LONGHOLD"):      # one note held a long time, then released: its voice and envelope
         at(0, "chord", (0x40, 0x40, 0x40))
         at(1, "press", 24)
@@ -661,7 +669,7 @@ def spin(m, pc, *args, **kw):
                 vs_ = 0x8000EDC4 + 94 * v_
                 env_ = struct.unpack(">ii", uc.mem_read(AMP + 12 * v_, 8))
                 if uc.mem_read(vs_ + 0x28, 1)[0]:
-                    on_.append("v%d ph%d %.0fdB end%d gain%d" % (v_, env_[0], 20 * __import__("math").log10(max(abs(env_[1]), 1) / 2 ** 31),
+                    on_.append("v%d pos%d ph%d %.0fdB end%d gain%d" % (v_, struct.unpack(">i", uc.mem_read(vs_ + 4, 4))[0], env_[0], 20 * __import__("math").log10(max(abs(env_[1]), 1) / 2 ** 31),
                                uc.mem_read(vs_ + 0x29, 1)[0], struct.unpack(">i", uc.mem_read(vs_ + 0x10, 4))[0]))
             log.append("voices on, %s: %d  %s" % (act[1], len(on_), " ".join(on_)))
             amp_ = [struct.unpack(">ii", uc.mem_read(0x4199ed64 + 8 * v_, 8)) for v_ in range(8)]   # the real AMP envelope (1.54)
@@ -1101,31 +1109,23 @@ if LOOPTEST:
                 print("  voice %d note %d: a turn every %.1f blocks, %.1f wanted" % (v, note, per, want))
                 if abs(per - want) > 0.08 * want + 2:
                     lt_fail.append("voice %d note %d: turns every %.1f blocks, wanted %.1f" % (v, note, per, want))
-        if LOOPTEST == "sus":
-            rel = next((i for i, r in enumerate(body) if r[10] == 0), None) if False else None
-            after = [i for i, r in enumerate(body) if r[4] == 3]
-            if after:
-                i0 = after[0]
-                held = body[:i0]
-                if any(r[4] != 2 or s32(r[3]) != le for r in held[:len(held)]):
-                    lt_fail.append("voice %d note %d: not looping [%d, %d] while held" % (v, note, ls, le))
-                tail = body[i0:]                 # 0.24: on past END to the sample's own end, L (0.31: to END
-                tend_ = se if lend_ else L       # with a LOOP END)
-                if any(r[4] != 3 or s32(r[3]) != tend_ for r in tail if r[8]):
-                    lt_fail.append("voice %d note %d: after release, not FWD to %d" % (v, note, tend_))
-                off = next((j for j, r in enumerate(tail) if not r[8]), None)
-                if off is not None:
-                    last = tail[off - 1][5] if off else tail[0][5]
-                    if last < tend_ - rate - 200:
-                        lt_fail.append("voice %d note %d: stopped at %d, before the sample's end %d" % (v, note, last, L))
-                    elif max(r[5] for r in tail[:off]) > (le if lend_ else se):
-                        released_ok += 1
-            elif L - se < 64:                    # 0.24: no tail after END: it keeps looping through the release
-                late = [r for r in body if r[8] and r[0] > body[0][0] + 200]
-                if late and all(r[4] == 2 for r in late):
-                    released_ok += 1
-                elif late:
-                    lt_fail.append("voice %d note %d: no tail, but stopped looping after release" % (v, note))
+        if LOOPTEST == "sus":                    # 0.35: released, it loops over the tail after the loop
+            after = [i_ for i_, r in enumerate(body) if r[6] == 0 and r[8] and r[2] != body[0][2] and False]
+            tlo, thi = (le, se) if lend_ else (se, L)
+            if thi - tlo >= 320 and pcm_:
+                thi = zc_(thi, tlo + 320, L - 1)
+                tlo = zc_(tlo, 1, thi - 320)
+            else:
+                tlo, thi = ls, le                # no tail: it keeps the loop
+            rel = [i_ for i_, r in enumerate(body) if r[4] == 2 and s32(r[2]) == tlo and s32(r[3]) == thi]
+            if (tlo, thi) != (ls, le) and rel:
+                tail = body[rel[0]:]
+                if any(r[4] != 2 or (s32(r[2]), s32(r[3])) != (tlo, thi) for r in tail if r[8]):
+                    lt_fail.append("voice %d note %d: after release, not looping the tail [%d, %d]" % (v, note, tlo, thi))
+                if max(r[5] for r in tail) > le + 200:
+                    released_ok += 1             # it played on past the loop, into the rest of the sample
+            elif (tlo, thi) == (ls, le):
+                released_ok += 1                 # no tail: still looping, the decay fades it
         checked += 1
     if LOOPTEST == "live":                      # LOOP turned while the chord sounds: the loop's start moves
         held = [(v, rs) for v, rs in notes if rs and rs[0][0] <= LIVE_STEP <= rs[-1][0]]
@@ -1146,7 +1146,7 @@ if LOOPTEST:
     if LOOPTEST in ("hold", "lfin", "alt", "rev") and speed < 2:
         lt_fail.append("too few laps to measure loop speed against pitch (%d)" % speed)
     if LOOPTEST == "sus" and not released_ok:
-        lt_fail.append("no released note played its tail to the sample's end, or looped on with no tail")
+        lt_fail.append("no released note went on into the rest of the sample (or kept its loop with no tail)")
     fails.extend(lt_fail)
 
 if os.environ.get("DIGICMI_LOOPPROBE"):
