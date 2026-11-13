@@ -334,6 +334,14 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Loop test "sus" rewritten for this (window = the snapped tail, PLAY 2, playhead past LOOP END); passing for LEN 120 (40), LEN 90 (36), LEND 100 (36); hold passes.
 - B/D pop-ups in sample mode: `digipoly_setparam` sets `digicmi_mute_pop`; the page tick holds `mute_hold` for POPUP_TICKS (cancelled by another knob's turn) and `digicmi_wave_draw` paints the title bar black (x 18-127, y 55-63) over the "=". Checked: B and D plain, C's pop-up shows.
 
+## SUS dead stop found: ping-pong's end flag (0.36)
+
+- The user plays almost always in **P (ping-pong)**; every SUS test before used FWD.L. Reproduced on 0.34 (`DIGICMI_SUSREL=300 DIGICMI_PLAY=4 DIGICMI_LOOP=0 DIGICMI_LEND=13 DIGICMI_LMOD=100`): V+0x29 (end reached) is 1 throughout ping-pong; at release SUS returned P_FWD, the gain stage saw non-looping + end reached and quartered the gain: 1048379939 -> 249 -> 0 in two steps, the playhead running on silently (so position-only checks passed).
+- 0.36: SUS is a play-once tail again (0.31 rules: [LOOP, END] with a LOOP END, else [LOOP, sample end]; REV.L [LOOP END, 0]), and at the moment it leaves the loop (`sus_left`) V+0x29 is cleared. Measured: P and FWD.L, gain unchanged after release, playhead to the sample's end, then the voice ends. 0.35's looping tail (`sus_tail`) is gone.
+- Loop test sus: play-once check again (FWD to END/sample end, playhead past LOOP END); `DIGICMI_SUSPLAY=4` runs it in P. Passing: sus LEN 90, LEND 100, LEN 120, P + LEND 100; hold; alt.
+- **B/D on the sample page**: `digicmi_enc` (core `ev_enc`, order 40; `int f(void *brain, void *ev)`, ev+12 = encoder 1-8) returns 1 for encoders 2 and 4 while `page2_live` and ENG = SMPL: no set_param, no pop-up. 0.35's black title bar is gone. Checked: sample B/D values unchanged and the title bar keeps the pattern name; time synth B/D/C all change.
+- Lesson: test in the mode the user plays (P), and check gain/audio, not only the playhead.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

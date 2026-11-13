@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.36 (2026-11-13): SUS fixed in ping-pong; unused knobs do nothing
+
+The cause of SUS stopping dead on release: in ping-pong the voice's "end reached" flag stays set, and once SUS stopped looping the firmware treated the note as finished. The flag is now cleared on release, and SUS is back to what it means: stop looping and play through the rest of the sample once. On the sample page, B and D now do nothing at all: no pop-up, no change.
+
 ## 0.35 (2026-11-13): SUS plays on and fades; no pop-up for unused knobs
 
 On the unit, a SUS note held then released stopped dead without playing the rest of the sample. On release, SUS now keeps the voice looping: it plays on through the rest of the sample, then loops the part after the loop while the AMP decay fades it. Turning B or D on the sample page no longer shows a pop-up.

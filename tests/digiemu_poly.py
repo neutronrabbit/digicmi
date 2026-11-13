@@ -100,7 +100,7 @@ PROBE_EXTRAS = [int(os.environ.get(k, "0")) for k in ("DIGICMI_LLEN", "DIGICMI_L
 LOOPTEST = os.environ.get("DIGICMI_LOOPTEST")      # hold, sus, alt or lfin: the loop controls, checked
 if LOOPTEST:
     os.environ["DIGICMI_LOOPPROBE"] = "1"
-    PROBE_PLAY = {"alt": 4, "rev": 1}.get(LOOPTEST, 2)   # 4: CMI's P (ping-pong); 1: REV.L
+    PROBE_PLAY = {"alt": 4, "rev": 1}.get(LOOPTEST, int(os.environ.get("DIGICMI_SUSPLAY", "2")))   # 4: P; 1: REV.L
     PROBE_LOOP = 60
     PROBE_EXTRAS = {"hold": [0, 0, 0, 0], "sus": [0, 100, 0, 0], "alt": [0, 0, 0, 0], "lfin": [0, 0, 0, 64],
                     "live": [0, 0, 0, 0], "rev": [0, 0, 0, 0]}[LOOPTEST] + [0, 0]   # 0.13: no LLEN, loops run to END
@@ -1109,23 +1109,19 @@ if LOOPTEST:
                 print("  voice %d note %d: a turn every %.1f blocks, %.1f wanted" % (v, note, per, want))
                 if abs(per - want) > 0.08 * want + 2:
                     lt_fail.append("voice %d note %d: turns every %.1f blocks, wanted %.1f" % (v, note, per, want))
-        if LOOPTEST == "sus":                    # 0.35: released, it loops over the tail after the loop
-            after = [i_ for i_, r in enumerate(body) if r[6] == 0 and r[8] and r[2] != body[0][2] and False]
-            tlo, thi = (le, se) if lend_ else (se, L)
-            if thi - tlo >= 320 and pcm_:
-                thi = zc_(thi, tlo + 320, L - 1)
-                tlo = zc_(tlo, 1, thi - 320)
-            else:
-                tlo, thi = ls, le                # no tail: it keeps the loop
-            rel = [i_ for i_, r in enumerate(body) if r[4] == 2 and s32(r[2]) == tlo and s32(r[3]) == thi]
-            if (tlo, thi) != (ls, le) and rel:
-                tail = body[rel[0]:]
-                if any(r[4] != 2 or (s32(r[2]), s32(r[3])) != (tlo, thi) for r in tail if r[8]):
-                    lt_fail.append("voice %d note %d: after release, not looping the tail [%d, %d]" % (v, note, tlo, thi))
-                if max(r[5] for r in tail) > le + 200:
+        if LOOPTEST == "sus":                    # 0.36: released, it plays on through the rest once (FWD)
+            tend_ = se if lend_ else L
+            after = [i_ for i_, r in enumerate(body) if r[4] == 3]
+            if tend_ - le >= 64 and after:
+                tail = body[after[0]:]
+                if any(r[4] != 3 or s32(r[3]) != tend_ for r in tail if r[8]):
+                    lt_fail.append("voice %d note %d: after release, not FWD to %d" % (v, note, tend_))
+                if max(r[5] for r in tail) > le:
                     released_ok += 1             # it played on past the loop, into the rest of the sample
-            elif (tlo, thi) == (ls, le):
-                released_ok += 1                 # no tail: still looping, the decay fades it
+            elif tend_ - le < 64:
+                late = [r for r in body if r[8] and r[0] > body[0][0] + 200]
+                if late and all(r[4] in (2, 0, 1) for r in late):
+                    released_ok += 1             # no tail: it keeps its loop
         checked += 1
     if LOOPTEST == "live":                      # LOOP turned while the chord sounds: the loop's start moves
         held = [(v, rs) for v, rs in notes if rs and rs[0][0] <= LIVE_STEP <= rs[-1][0]]

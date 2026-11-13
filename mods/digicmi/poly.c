@@ -345,7 +345,6 @@ static int owner_of(int w, const unsigned char *kit)       /* the track whose so
 /* replaces 0x400771e8 (value, voice, slot): the stock write, then the same value on every voice that is
  * playing that track's sound */
 volatile int digicmi_param_moved;               /* cmi_page.c: a parameter was set (a knob's pop-up is up) */
-volatile int digicmi_mute_pop;                  /* cmi_page.c: that was B or D in sample mode: hide its pop-up */
 
 void digipoly_setparam(int value, int voice, int slot)
 {
@@ -371,7 +370,6 @@ void digipoly_setparam(int value, int voice, int slot)
         && ((*(const short *)((const char *)kit + 0x20 + voice * 0xa2 + 0x14 + 2 * 51) >> 8) & 127) < 96) {
         /* digicmi 0.34: BLND and TIME (B, D) are the time synth's: in sample mode a turn changes nothing */
         unsigned char *ui = UI_KIT;
-        digicmi_mute_pop = 1;
         value = PARAMS[53 * voice + 8 + slot];
         *(volatile short *)((char *)kit + 0x20 + voice * 0xa2 + 0x14 + 2 * slot) = (short)value;
         if (ui)

@@ -113,37 +113,15 @@ static void zc_snap(int v, int *ls, int *le)
 #define AMP_BLOCKS  64
 static unsigned char fade_end[8], fade_count[8], fade_flagged[8];
 
-/* SUS's release tail (0.35): the voice stays looping (never the firmware's non-looping path), over the tail: the
- * part after the loop. Forward, with LOOP END: [LOOP END, END]; without: [END, the sample's end]; reverse (REV.L):
- * [0, LOOP], played downwards. The playhead is still in the loop when the key is let go, so it runs on through the
- * rest of the sample and then round the tail, until the AMP envelope's decay has faded it (0.30's switch-off then
- * ends the voice). A tail shorter than MIN_LOOP: no tail, it keeps the loop. Its ends on zero crossings, cached per
- * voice. (0.24-0.34 played the tail once, non-looping, and stopped at its end; on the unit a held SUS note
- * stopped dead at release, and the rest of the sample didn't play.) */
-static const short *tail_pcm[8];
-static int tail_in[8][2], tail_out[8][2];
-
-static int zc_near(const short *pcm, int len, int pos, int lo, int hi);
-
-static int sus_tail(int v, int *lo, int *hi)
-{
-    const short *pcm = PCM(v);
-    int len = (int)SLEN(v);
-    if (*hi - *lo < MIN_LOOP)
-        return 0;
-    if ((u32)pcm < 0x40000000u || len < 1024)
-        return 1;
-    if (pcm != tail_pcm[v] || *lo != tail_in[v][0] || *hi != tail_in[v][1]) {
-        tail_pcm[v] = pcm;
-        tail_in[v][0] = *lo;
-        tail_in[v][1] = *hi;
-        tail_out[v][1] = zc_near(pcm, len, *hi, *lo + MIN_LOOP, len - 1);
-        tail_out[v][0] = zc_near(pcm, len, *lo, 1, tail_out[v][1] - MIN_LOOP);
-    }
-    *lo = tail_out[v][0];
-    *hi = tail_out[v][1];
-    return 1;
-}
+/* SUS's release (0.36): on release the voice stops looping and plays on through the rest of the sample once:
+ * forward to END with a LOOP END, else on past END to the sample's end; REV.L down past STRT to the sample's
+ * start. It then ends there (the firmware's end-of-sample), or sooner if the AMP decay fades it first.
+ * The voice's "end reached" flag (V + 0x29) is cleared at that moment: a looping voice sets it at each wrap and
+ * ping-pong's turns leave it set, and a non-looping voice with it set has its gain quartered every block by the
+ * gain stage, so 0.24-0.34's tail was silenced at once in P mode (measured: gain 1048379939 -> 249 -> 0 within
+ * two steps of release, the playhead running on silently). 0.35 kept the tail looping instead; 0.36 plays it once,
+ * as SUS means. */
+static unsigned char sus_left[8];                            /* the note has left its loop (set at release) */
 
 static signed char dir[8];
 static unsigned char released[8], have[8], eff[8];
@@ -222,34 +200,41 @@ int digicmi_play(int v, int play, int *win)
     int start = (int)((fw_voice_start >> v) & 1), pos = POS(v);
     if (start) {
         released[v] = 0;
+        sus_left[v] = 0;
         dir[v] = 1;
         have[v] = 0;
     } else if (fw_amp_env[3 * v] == 0)
         released[v] = 1;
 
     if (rev) {                                               /* REV.L: the same loop, backwards from END */
-        if (sus && released[v] && !start) {                  /* SUS, let go: on down, round [0, LOOP] */
-            int lo = 0, hi = ls;
-            if (sus_tail(v, &lo, &hi)) {
-                win[0] = hi;
-                win[1] = lo;
-                eff[v] = P_REVL;
-                return P_REVL;
+        if (sus && released[v] && !start && ls >= TAIL_MIN) {    /* SUS, let go: down past STRT to the
+                                                                    sample's start, once */
+            if (!sus_left[v]) {
+                *(volatile unsigned char *)(V(v) + 0x29) = 0;   /* no stale "end reached" (0.36) */
+                sus_left[v] = 1;
             }
+            win[0] = le;
+            win[1] = 0;
+            eff[v] = P_REV;
+            return P_REV;
         }
         win[0] = start ? se : le;
         win[1] = ls;
         eff[v] = P_REVL;
         return P_REVL;
     }
-    if (sus && released[v] && !start) {                      /* SUS, let go: on through the rest, round the
-                                                                    tail: [LOOP END, END], or [END, sample end] */
-        int lo = lendv >= 0 ? le : se, hi = lendv >= 0 ? se : (int)len;
-        if (sus_tail(v, &lo, &hi)) {
-            win[0] = lo;
+    if (sus && released[v] && !start) {                      /* SUS, let go: on through the rest, once: to
+                                                                    END with a LOOP END, else to the sample's end */
+        int hi = lendv >= 0 ? se : (int)len;
+        if (hi - le >= TAIL_MIN) {
+            if (!sus_left[v]) {
+                *(volatile unsigned char *)(V(v) + 0x29) = 0;   /* no stale "end reached" (0.36) */
+                sus_left[v] = 1;
+            }
+            win[0] = ls;
             win[1] = hi;
-            eff[v] = P_FWDL;
-            return P_FWDL;
+            eff[v] = P_FWD;
+            return P_FWD;
         }
     }
     if (start || !alt) {
