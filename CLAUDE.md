@@ -300,6 +300,14 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Measured (digiemu): pile-up voices go off in order of their decay; a 1200-step held note's release fades 0.9975 -> 0.0097 by +320 steps and stays on meanwhile (no dead stop); overlap both sides; sus (LEN 90) and hold pass. The regression's old "quietest" steal check is retired (only eligibility is checked).
 - Unverified on the unit: the load after playing (94% -> 86%?) and the lag.
 
+## Freeze report; LOOP END; lighter time synth (0.31)
+
+- On the unit with 0.30: froze when switching ENG (sample <-> time synth) while notes sounded. Not reproduced in digiemu (`DIGICMI_ENGFLIP=1`: chord held, ENG on and off on page 1; the run completes, no faults). Likely an audio overload: the meter already reads 85-94%, and the time synth measured ~1,160 instructions a voice a block (4 voices: 89,672 a block vs 85,238 in sample mode); past 100% the render's interrupt runs back to back and the UI never runs, which looks like a freeze. digiemu doesn't run in real time, so it can't show this. Unconfirmed.
+- 0.31 `ts_voice`: TIME/BLND sums cached per voice; one table read when the crossfade is 0 or 1 or the two waves are the same; when `digicmi_cpu_load` > 235 (~92%) table points without interpolation. Measured, 4 voices: 4,628 -> 3,078 instructions a block (lite: 1,668).
+- **LOOP END** = extra 14, slot 52 (CC 30), page 2 H in both engines (LEV on page 1 only). 0 (default; also any value with a low byte, as old kits hold) = END; 1-127 = value x 120 / 127 on the 0-120 scale, kept in [LOOP, END]. Sample: the loop window's end (snapped as before); SUS with a LOOP END plays [LOOP, END] as FWD on release; without one, 0.24's tail past END. TIME: `ts_loop_end` -> the wave the loop runs to (FWD.L to it then round from LOOP, P between them, REV.L from LOOP back to it). Page 2 draws its marker.
+- Slot 52 was the last free extra: SMEAR keeps sharing LMOD's slot, and SLUR (parked on `slur-wip` as a slot-52 switch) needs reworking as LMOD settings.
+- Tests: `DIGICMI_LEND` sets slot 52; the loop test computes the window with it. Passing: hold, hold LEND 100 ([4800, 7528]), sus LEND 100, sus LEN 90.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

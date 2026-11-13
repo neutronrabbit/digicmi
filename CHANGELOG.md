@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.31 (2026-11-13): LOOP END, lighter time synth
+
+LOOP END is back, on page 2 H (level stays on page 1): END by default, or a place in the sample, snapped to a zero crossing; with SUS, releasing plays from the loop on to END. In the time synth it sets the wave the loop runs to. The time synth costs about a third less, and reads its waves more cheaply when the audio is near its limit. Known issue: the unit froze on 0.30 when ENG was switched while notes sounded; not reproduced in the emulator, and an audio overload is the likely cause.
+
 ## 0.30 (2026-11-13): silent voices switch off, by the real amp envelope
 
 A released note's voice is switched off once its amp envelope has decayed below -90 dB for 64 blocks. The amp envelope is the firmware's own (found by disassembling the render), checked against the audio output; 0.26-0.27 used a value that turned out to be the filter envelope's. Known issue: OS 1.53's address is inferred, and the effect on the audio load needs checking on the unit.

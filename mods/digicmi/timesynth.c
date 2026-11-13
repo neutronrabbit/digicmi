@@ -349,13 +349,23 @@ int digicmi_ts_pos(int v)
 }
 
 /* Render-task: voice v's block from the tables. play_pos is the stock player's playhead (its move per block is
- * the pitch), mode PLAY's 0-4, time G's 0-120, blend B's 0-127, gain the voice's (V + 0x10), start a note's
- * first block. */
-void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, int loop_frame, int gain, int start)
+ * the pitch), mode PLAY's 0-4, time T's 0-120, blend B's 0-127, loop_frame / loop_end the loop's two waves (16.16
+ * of 0-15; LOOP and LOOP END), gain the voice's (V + 0x10), start a note's first block.
+ * Cost (0.31): measured ~1,160 instructions a voice a block in 0.30, enough with eight voices to push an audio
+ * engine already at 85-94% past 100% (the UI then never runs: a "freeze"). Now the per-block sums are cached
+ * per voice (TIME, BLND), a block that needs one wave reads one table, and when the render's measured load
+ * (cpumeter.c) is above LITE_LOAD the waves are read without interpolation between table points. */
+#define LITE_LOAD 235                               /* 256ths: ~92% */
+extern volatile int digicmi_cpu_load;
+static int c_time[8] = {-1, -1, -1, -1, -1, -1, -1, -1}, c_step[8];
+static int c_blend[8] = {-1, -1, -1, -1, -1, -1, -1, -1}, c_width[8];
+
+void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, int loop_frame, int loop_end,
+              int gain, int start)
 {
-    const short (*t)[TS_LEN + 1];
-    int adv, i, f0, f1, ff, blocks, whole, scl, width;
-    u32 inc;
+    const short *t0, *t1;
+    int adv, i, f0, f1, ff, scl, width, lite;
+    u32 inc, p;
     if ((unsigned)v > 7)
         return;
     if (bank < 0 || gain <= 0) {
@@ -363,7 +373,6 @@ void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, in
             b[i] = 0;
         return;
     }
-    t = (const short (*)[TS_LEN + 1])tab[bank];
     adv = play_pos - last_pos[v];
     adv = adv < 0 ? -adv : adv;
     last_pos[v] = play_pos;
@@ -376,37 +385,44 @@ void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, in
         rate[v] = adv << 11;                        /* adv / 32 output samples, 16.16 */
     inc = root_inc * (u32)(rate[v] >> 8);
 
-    /* the pass, once a block: a whole one takes 75 x 2^(G/15) blocks */
+    /* the pass, once a block: a whole one (first wave to last) takes 75 x 2^(T/15) blocks */
     time = time < 0 ? 0 : time > 120 ? 120 : time;
-    whole = time / 15;
-    blocks = (int)(((u32)(75 << whole) * 32768u) / exp2n[(time % 15) * 16 / 15]);
-    if (blocks < 1)
-        blocks = 1;
+    if (time != c_time[v]) {
+        int blocks = (int)(((u32)(75 << (time / 15)) * 32768u) / exp2n[(time % 15) * 16 / 15]);
+        c_step[v] = LAST_FRAME / (blocks < 1 ? 1 : blocks) + 1;
+        c_time[v] = time;
+    }
     if (!start)
-        fpos[v] += fdir[v] * (LAST_FRAME / blocks + 1);
-    loop_frame = loop_frame < 0 ? 0 : loop_frame > LAST_FRAME ? LAST_FRAME : loop_frame;
-    if (fpos[v] > LAST_FRAME) {
-        if (mode == 2)                              /* FWD.L: round again, from LOOP's wave */
+        fpos[v] += fdir[v] * c_step[v];
+    loop_end = loop_end < 0 ? 0 : loop_end > LAST_FRAME ? LAST_FRAME : loop_end;
+    loop_frame = loop_frame < 0 ? 0 : loop_frame > loop_end ? loop_end : loop_frame;
+    if (mode == 2) {                                /* FWD.L: first to LOOP END, then round from LOOP */
+        if (fpos[v] > loop_end)
             fpos[v] = loop_frame;
-        else if (mode == 4) {                       /* P: back, towards LOOP's wave */
-            fpos[v] = LAST_FRAME;
+    } else if (mode == 4) {                         /* P: first to LOOP END, then between it and LOOP */
+        if (fdir[v] > 0 && fpos[v] > loop_end) {
+            fpos[v] = loop_end;
             fdir[v] = -1;
-        } else
-            fpos[v] = LAST_FRAME;                   /* FWD: stay on the last wave */
-    } else if (fdir[v] < 0 && (mode == 1 || mode == 4) && fpos[v] < loop_frame) {
-        if (mode == 1)                              /* REV.L: down to LOOP's wave, and round from the last */
-            fpos[v] = LAST_FRAME;
-        else {                                      /* P: forward again from LOOP's wave */
+        } else if (fdir[v] < 0 && fpos[v] < loop_frame) {
             fpos[v] = loop_frame;
             fdir[v] = 1;
         }
-    } else if (fpos[v] < 0)
+    } else if (mode == 1) {                         /* REV.L: last down to LOOP, then round from LOOP END */
+        if (fpos[v] < loop_frame)
+            fpos[v] = loop_end;
+    } else if (fpos[v] > LAST_FRAME)
+        fpos[v] = LAST_FRAME;                       /* FWD: stay on the last wave */
+    else if (fpos[v] < 0)
         fpos[v] = 0;                                /* REV: stay on the first wave */
     f0 = fpos[v] >> 16;
     f1 = f0 < TS_FRAMES - 1 ? f0 + 1 : f0;
     ff = (fpos[v] & 0xffff) >> 1;                   /* 15 bits */
     blend = blend < 0 ? 0 : blend > 127 ? 127 : blend;
-    width = blend * blend * blend / 63 * 32768 / 32513;   /* the crossfade's share between two waves: (B/127)^3 */
+    if (blend != c_blend[v]) {
+        c_width[v] = blend * blend * blend / 63 * 32768 / 32513;   /* the crossfade's share: (B/127)^3 */
+        c_blend[v] = blend;
+    }
+    width = c_width[v];
     if (width <= 0)
         ff = ff >= 16384 ? 32768 : 0;
     else if (width < 32768) {
@@ -414,14 +430,37 @@ void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, in
         ff = ff < 0 ? 0 : ff > 32768 ? 32768 : ff;
     }
     scl = (int)((((u32)gain >> 15) * 207u) >> 8);   /* gain x 0.81, as a sample's block */
-
-    for (i = 0; i < 32; i++) {
-        u32 p = phase[v];
-        int idx = (int)(p >> 24), fr = (int)((p >> 9) & 0x7fff);
-        int a = t[f0][idx] + ((t[f0][idx + 1] - t[f0][idx]) * fr >> 15);
-        int c = t[f1][idx] + ((t[f1][idx + 1] - t[f1][idx]) * fr >> 15);
-        int s = a + ((c - a) * ff >> 15);
-        b[i] = s * scl;
-        phase[v] = p + inc;
+    t0 = tab[bank][f0];
+    t1 = tab[bank][f1];
+    if (ff >= 32768) {                              /* all of the next wave */
+        t0 = t1;
+        ff = 0;
     }
+    if (f0 == f1)
+        ff = 0;
+    lite = digicmi_cpu_load > LITE_LOAD;
+    p = phase[v];
+    if (lite) {                                     /* near the limit: table points, no interpolation */
+        if (!ff)
+            for (i = 0; i < 32; i++, p += inc)
+                b[i] = t0[p >> 24] * scl;
+        else
+            for (i = 0; i < 32; i++, p += inc) {
+                int a = t0[p >> 24];
+                b[i] = (a + ((t1[p >> 24] - a) * ff >> 15)) * scl;
+            }
+    } else if (!ff) {                               /* one wave */
+        for (i = 0; i < 32; i++, p += inc) {
+            int idx = (int)(p >> 24), fr = (int)((p >> 9) & 0x7fff), a = t0[idx];
+            b[i] = (a + ((t0[idx + 1] - a) * fr >> 15)) * scl;
+        }
+    } else {                                        /* two waves, crossfaded */
+        for (i = 0; i < 32; i++, p += inc) {
+            int idx = (int)(p >> 24), fr = (int)((p >> 9) & 0x7fff);
+            int a = t0[idx] + ((t0[idx + 1] - t0[idx]) * fr >> 15);
+            int c = t1[idx] + ((t1[idx + 1] - t1[idx]) * fr >> 15);
+            b[i] = (a + ((c - a) * ff >> 15)) * scl;
+        }
+    }
+    phase[v] = p;
 }

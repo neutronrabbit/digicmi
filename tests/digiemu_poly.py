@@ -183,6 +183,18 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
         at(1, "phase", "slur"); at(1, "press", 24); at(60, "press", 25); at(60, "release", 25); at(5, "release", 24)
         at(200, "press", 26); at(60, "release", 26); at(200, "wait"); at(0, "phase", None)
         PAGES_END = t + 2
+    if os.environ.get("DIGICMI_ENGFLIP"):       # page 1: a chord held, ENG turned on and off while it sounds
+        at(0, "chord", (0x44, 0x47, 0x4b))
+        at(1, "press", 24); at(60, "voices", "chord held, ENG off")   # (the SRCSHOT flow ends on page 1)
+        for _ in range(5):
+            at(4, "encoder", 3, 4)
+        at(60, "slots8bit", "ENG up, chord held"); at(0, "voices", "ENG up, chord held"); at(0, "snap", "q6_eng_up")
+        at(120, "voices", "ENG up +120")
+        for _ in range(5):
+            at(4, "encoder", 3, -4)
+        at(60, "slots8bit", "ENG down, chord held"); at(0, "voices", "ENG down, chord held"); at(0, "snap", "q6_eng_down")
+        at(5, "release", 24); at(200, "voices", "released +200"); at(0, "snap", "q6_after")
+        PAGES_END = t + 2
     if os.environ.get("DIGICMI_LONGHOLD"):      # one note held a long time, then released: its voice and envelope
         at(0, "chord", (0x40, 0x40, 0x40))
         at(1, "press", 24)
@@ -718,6 +730,12 @@ def spin(m, pc, *args, **kw):
                     dv_ = int(os.environ["DIGICMI_AMPDEC"]) << 8
                     for k_ in (kit, ek):
                         uc.mem_write(k_ + 0x20 + 0x14 + 2 * 40, struct.pack(">h", dv_))
+                if os.environ.get("DIGICMI_LEND") is not None:    # LOOP END (slot 52) on both kits and every voice copy
+                    le_ = int(os.environ["DIGICMI_LEND"]) << 8
+                    for k_ in (kit, ek):
+                        uc.mem_write(k_ + 0x20 + 0x14 + 2 * 52, struct.pack(">h", le_))
+                    for w in range(8):
+                        uc.mem_write(0x800014f2 + 2 * (53 * w + 8 + 52), struct.pack(">h", le_))
                 if os.environ.get("DIGICMI_LEN") is not None:     # LEN (slot 22) on both kits and every voice copy
                     lv_ = int(os.environ["DIGICMI_LEN"]) << 8
                     for k_ in (kit, ek):
@@ -984,6 +1002,9 @@ if LOOPTEST:
     se = sc(lenv_, L)                             # END (STRT is 0)
     ls = sc(min(max(PROBE_LOOP * 256 - 1, 0), lenv_), L)
     le = se
+    lend_ = int(os.environ.get("DIGICMI_LEND", "0"))   # 0.31: LOOP END (slot 52), 0 = END
+    if lend_:
+        le = sc(min(max(lend_ * 0x7800 // 127, min(max(PROBE_LOOP * 256 - 1, 0), lenv_)), lenv_), L)
     pcm_ = state.get("test_pcm")
     def zc_(pos, lo, hi):                         # 0.23: cmi_loop.c's zc_near, independently
         lo, hi = max(lo, 1), min(hi, L - 1)
@@ -1074,15 +1095,16 @@ if LOOPTEST:
                 held = body[:i0]
                 if any(r[4] != 2 or s32(r[3]) != le for r in held[:len(held)]):
                     lt_fail.append("voice %d note %d: not looping [%d, %d] while held" % (v, note, ls, le))
-                tail = body[i0:]                 # 0.24: on past END to the sample's own end, L
-                if any(r[4] != 3 or s32(r[3]) != L for r in tail if r[8]):
-                    lt_fail.append("voice %d note %d: after release, not FWD to the sample's end %d" % (v, note, L))
+                tail = body[i0:]                 # 0.24: on past END to the sample's own end, L (0.31: to END
+                tend_ = se if lend_ else L       # with a LOOP END)
+                if any(r[4] != 3 or s32(r[3]) != tend_ for r in tail if r[8]):
+                    lt_fail.append("voice %d note %d: after release, not FWD to %d" % (v, note, tend_))
                 off = next((j for j, r in enumerate(tail) if not r[8]), None)
                 if off is not None:
                     last = tail[off - 1][5] if off else tail[0][5]
-                    if last < L - rate - 200:
+                    if last < tend_ - rate - 200:
                         lt_fail.append("voice %d note %d: stopped at %d, before the sample's end %d" % (v, note, last, L))
-                    elif max(r[5] for r in tail[:off]) > se:
+                    elif max(r[5] for r in tail[:off]) > (le if lend_ else se):
                         released_ok += 1
             elif L - se < 64:                    # 0.24: no tail after END: it keeps looping through the release
                 late = [r for r in body if r[8] and r[0] > body[0][0] + 200]

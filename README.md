@@ -53,8 +53,8 @@ Page 2 (press SRC again), with ENG = SMPL:
 | C | LMOD | HOLD: loop for as long as the voice sounds; the AMP release fades it. SUS: loop while the note is held, then play the sample's tail past END to its own end (REV.L: past STRT to its start); with END at the sample's end there is no tail, so it keeps looping and the AMP release fades it |
 | E | STRT | Sample start |
 | F | LEN | Sample length (END = STRT + LEN) |
-| G | LOOP | Loop start (the loop runs to END) |
-| H | LEV | Level |
+| G | LOOP | Loop start |
+| H | LEND | Loop end: END (the default: the loop runs to STRT + LEN), or a place in the sample. With SUS, releasing plays on from the loop to END |
 
 Page 2 with ENG = TIME:
 
@@ -65,10 +65,10 @@ Page 2 with ENG = TIME:
 | C | SMEAR | Mixes each wave with its neighbours, up to all of them; 0 off; shown as S0-S127 (shares LMOD's value) |
 | D | TIME | Time of one pass from the first wave to the last, 0.05 s to about 13 s, shown in seconds |
 | E, F | STRT, LEN | The part of the sample the waves are cut from |
-| G | LOOP | Where the loop starts, between STRT and END (shown on the waveform) |
-| H | LEV | Level |
+| G | LOOP | The wave the loop starts at, between STRT and END (shown on the waveform) |
+| H | LEND | The wave the loop runs to: END (the last wave), or a place between LOOP and END |
 
-CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29. The other knobs keep ONESHOT's CCs.
+CCs: BLND 24, LMOD/SMEAR 25, SPRD 26, TIME 27, RETRO 28, ENG 29, LEND 30. Level is on page 1 (H). The other knobs keep ONESHOT's CCs.
 
 ## Usage
 
@@ -118,6 +118,9 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
+- LOOP END (0.31): with it at 100 the loop runs 4800-7528 on the test sample (both on zero crossings); SUS plays
+  on from the loop to END on release. Time synth cost, four voices: 4,628 instructions a block in 0.30, 3,078 in
+  0.31, 1,668 when the audio is near its limit.
 - Voices off when silent (0.30): six notes played and released: each voice switches off once its amp envelope
   has decayed (the voice reading 0.0001 of full scale goes first); a long-held note's release fades exactly as
   measured on the output (0.60 / 0.31 / 0.09 / 0.01 of full at +40/+80/+160/+320 steps).
@@ -149,7 +152,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.30-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.31-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -174,11 +177,11 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 | ![Machine list with CMI selected](media/01-machine-menu.png) | ![Page 1](media/02-page1.png) |
 | Machine list, CMI selected on track 1 (0.10; unchanged since) | Page 1: TUNE, RETRO (a dial), ENG, SAMP / SPRD, LEV; the title bar's CPU meter reads "--%" in the emulator (0.23) |
 | ![Page 2, sample](media/03-page2-sample.png) | ![Page 2, time synth](media/04-page2-time.png) |
-| Page 2, FWD.L loop, a note's playhead arrow (0.20) | Page 2 with ENG = TIME on a 196 Hz saw: BLND, SMEAR, TIME, the 16 waves' places and LOOP (0.20) |
+| Page 2, FWD.L loop with LOOP END, the held note's playhead arrow (0.31) | Page 2 with ENG = TIME on a 196 Hz saw: BLND, SMEAR, TIME, the 16 waves' places, LOOP and LOOP END (0.31) |
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.30`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.31`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

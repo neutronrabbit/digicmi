@@ -28,6 +28,7 @@
 #define EX_8BIT 12
 #define EX_ENG  13
 #define EX_SPRD 10
+#define EX_LEND 14                              /* slot 52: LOOP END (0.31) */
 #define EX_BLND 8                               /* the time synth's BLND (slot 46: 0.3-0.12's LLEN, 0.15's FORMANT) */
 #define P_BR    0x86                            /* BR's parameter id: the look of a plain 0..127 knob */
 #define B       CM_SRC_BLANK
@@ -89,6 +90,26 @@ static int32_t fmt_sprd(char *buf, int32_t v, int32_t ctx, int32_t m)
     else
         put_u(buf, (unsigned)v);
     return 1;
+}
+
+/* LOOP END (0.31, cmi_loop.c's lend_val): 0 = END, else 1-127 a place in the sample shown on LOOP's 0-120 scale */
+static int lend_of(int32_t v)
+{
+    if (v & 0xff)
+        return -1;
+    v = (v >> 8) & 127;
+    return v ? (int)v * 0x7800 / 127 : -1;
+}
+
+static int32_t fmt_pos(char *buf, int32_t v, int32_t ctx, int32_t m);
+static int32_t fmt_lend(char *buf, int32_t v, int32_t ctx, int32_t m)
+{
+    int k = lend_of(v);
+    if (k < 0) {
+        put_s(buf, ctx ? "END (TO LEN)" : "END");
+        return 1;
+    }
+    return fmt_pos(buf, k, ctx, m);
 }
 
 static int32_t fmt_num(char *buf, int32_t v, int32_t ctx, int32_t m)
@@ -226,7 +247,7 @@ static int32_t switch_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32
 #define WPROBES  64
 static const int8_t col_x[4] = {31, 57, 83, 109};   /* the encoders' columns (the knobs' centres) */
 
-static struct { int on, slot, play, strt, len, g, lfin, lmod, blnd, eng; } shown;
+static struct { int on, slot, play, strt, len, g, lfin, lmod, blnd, eng, lend; } shown;
 extern int digicmi_voice_pos(int v, int *pos, uint32_t *len);   /* cmi_loop.c: a sounding CMI voice's playhead */
 static signed char lo[WCOLS], hi[WCOLS];
 static const short *peaks_pcm;
@@ -239,7 +260,7 @@ static int clampi(int x, int a, int b)
 
 static int32_t lmod_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t flag)
 {
-    static const int8_t ks[] = {1, 3, 4, 5, 6, EX_LFIN, EX_BLND, EX_ENG};
+    static const int8_t ks[] = {1, 3, 4, 5, 6, EX_LFIN, EX_BLND, EX_ENG, EX_LEND};
     int32_t v[sizeof ks];
     unsigned i;
     (void)bmp; (void)x; (void)y; (void)flag;
@@ -254,6 +275,7 @@ static int32_t lmod_draw(void *bmp, int32_t x, int32_t y, int32_t value, int32_t
     shown.lfin = (v[5] >> 8) & 127;
     shown.blnd = (v[6] >> 8) & 127;
     shown.eng = (v[7] >> 8) & 127;
+    shown.lend = lend_of(v[8]);
     shown.lmod = (value >> 8) & 127;
     shown.on = 1;
     return 0;
@@ -470,6 +492,11 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
                 fw_fillrect(bmp, clampi(x - 2, PX0, 127), 8, clampi(x + 2, PX0, 127), 8, 1);
             }
         }
+        if (looped && shown.lend >= 0) {         /* LOOP END's place, dotted with a bar on top */
+            int l = col_of(clampi(shown.lend, loopv, endv));
+            dotted(bmp, l);
+            fw_fillrect(bmp, clampi(WX0 + l - 2, 0, 127), WMID + WHALF + 2, WX0 + l, WMID + WHALF + 2, 1);
+        }
         if (looped) {                            /* LOOP's place, dotted with a bar on top, as the sample's */
             int l = col_of(loopv);
             dotted(bmp, l);
@@ -477,7 +504,7 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
         }
         return;
     }
-    le = endv;                                   /* the loop runs to END */
+    le = shown.lend >= 0 ? clampi(shown.lend, loopv, endv) : endv;   /* the loop runs to LOOP END, or END */
     for (c = 0; c < 8; c++) {                    /* the playheads: an arrow under the wave for each note */
         int pos;
         uint32_t vl;
@@ -504,7 +531,8 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
 
 static const struct cm_src_page pages[2] = {
     {"CMI", {0, EX_8BIT, EX_ENG, 3, EX_SPRD, B, B, 7}, 0, {0, 0, 0}},
-    {"CMI LOOP", {1, EX_BLND, EX_LMOD, EX_LFIN, 4, 5, 6, 7}, 0, {0, 0, 0}},   /* drawn by digicmi_wave_draw */
+    {"CMI LOOP", {1, EX_BLND, EX_LMOD, EX_LFIN, 4, 5, 6, EX_LEND}, 0, {0, 0, 0}},   /* drawn by digicmi_wave_draw;
+                                                                                   H LOOP END (LEV on page 1) */
 };
 
 const struct cm_ui32 digicmi_page = {
@@ -533,7 +561,7 @@ const struct cm_ui32 digicmi_page = {
           .cc = 29, .min = 0, .max = 127 << 8, .def = SW_OFF, .fmt = fmt_eng, .draw = switch_draw },
         /* 14: on no page, but machine-pages refuses the whole page unless all seven are valid. Slot 52: Digi
          * Poly's marker until 0.19, the time synth's ROOT 0.20-0.22 (removed; the time synth is always AUTO). */
-        { .name = "-", .lname = "Unused", .look = P_BR, .flags = CM_RANGE | CM_DEFAULT, .max = 0x7f00, .def = 0 },
+        EXTRA("LEND", "Loop End", 0, fmt_lend, 30),          /* slot 52: LOOP END (0.31); 0 = END */
     },
     .page_count = 2, .pages = pages,
 };
