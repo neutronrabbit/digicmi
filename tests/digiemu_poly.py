@@ -1147,6 +1147,10 @@ if os.environ.get("DIGICMI_LOOPPROBE"):
         allv = [x for b in bb for x in b]
         pk = max(abs(x) for x in allv) or 1
         print("BR %s: %d blocks, peak %d, distinct values %d" % (os.environ.get("DIGICMI_BR"), len(bb), pk, len(set(allv))))
+        import hashlib as _hl                    # a fingerprint of the blocks, to compare builds' output exactly
+        print("blocks fingerprint: %s" % _hl.sha256(repr(state.get("allblk", [])).encode()).hexdigest()[:16])
+        if os.environ.get("DIGICMI_BLKDUMP"):
+            json.dump(state.get("allblk", []), open(os.environ["DIGICMI_BLKDUMP"], "w"))
         if PROBE_EXTRAS[4] >= 64:                # RETRO: per voice, held runs that follow its pitch, and the 8-bit grid
             for v in range(4):
                 rep = tot = off = 0

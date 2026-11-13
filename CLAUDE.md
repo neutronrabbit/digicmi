@@ -308,6 +308,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Slot 52 was the last free extra: SMEAR keeps sharing LMOD's slot, and SLUR (parked on `slur-wip` as a slot-52 switch) needs reworking as LMOD settings.
 - Tests: `DIGICMI_LEND` sets slot 52; the loop test computes the window with it. Passing: hold, hold LEND 100 ([4800, 7528]), sus LEND 100, sus LEN 90.
 
+## RETRO's cost (0.32)
+
+- On the unit (0.31): the UI slowed right down while playing with RETRO on, in both engines; fine with RETRO off. Cause: `b[i] -= b[i] % step` on every output sample of every CMI voice (a `rems.l`, ~20-35 cycles on the ColdFire, counted as one instruction by `DIGICMI_INSNPROF`, which is why the profile under-read it), plus a `%=` (remu) per held value in the clock.
+- 0.32: `retro_rate(v, b, mode, step)` truncates once per taken value (the held values are the only values); the clock's wrap is a subtraction (a loop only above an octave up). `digicmi_render` skips voices that are off (V+0x28 == 0). Divisions at 8/24 near the root: ~48 -> ~16 per voice per block. Instructions, 4 voices RETRO 8/24: digicmi_render 2,834 -> 2,270 a block.
+- Checked: RETRO held shares 0.531/0.427/0.312/0.129 and 0 off-grid values, same as 0.31; regression PASS. Block-by-block output can't be compared across builds in digiemu (note starts shift with code timing; `DIGICMI_BLKDUMP` writes the blocks).
+- Lesson: on this CPU, count divisions, not just instructions, in per-sample code.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

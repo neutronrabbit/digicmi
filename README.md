@@ -118,6 +118,9 @@ Measured in [digiemu](https://github.com/irpina/digiemu) on OS 1.54 (`tests/digi
   (E ×1.260, G ×1.498, B ×1.888 against C).
 - RETRO: every value on the 8-bit grid; held-sample share follows the 24 kHz clock model.
 - SPRD at 127: notes alternate hard left and hard right at full level (stereo output read from the emulated SSI).
+- RETRO cost (0.32): the 8-bit cut is applied once per held value instead of to every output sample, so about a
+  third of the divisions (the slow instruction here) at 8 bit 24 kHz; voices that are off are skipped. Held-sample
+  shares and the 8-bit grid unchanged (0.531 / 0.427 / 0.312 / 0.129 on a chord, 0 values off the grid).
 - LOOP END (0.31): with it at 100 the loop runs 4800-7528 on the test sample (both on zero crossings); SUS plays
   on from the loop to END on release. Time synth cost, four voices: 4,628 instructions a block in 0.30, 3,078 in
   0.31, 1,668 when the audio is near its limit.
@@ -152,7 +155,7 @@ included here.
 
 ```bash
 python3 -m elekloader.sdk.build mods/digicmi --stock Digitakt_OS1.54.syx --out build
-python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.31-os1.54.elemod --out digicmi.syx
+python3 -m elekloader.patch --stock Digitakt_OS1.54.syx --mod core-4.3-os1.54.elemod --mod machine-pages-1.10-os1.54.elemod --mod build/digicmi-0.32-os1.54.elemod --out digicmi.syx
 ```
 
 Then send the `.syx` with Elektron Transfer.
@@ -181,7 +184,7 @@ All captures are from digiemu (the emulator's LCD, 4× scale), not photos of a u
 
 ## History
 
-Each version is a tagged commit (`v0.1` ... `v0.31`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
+Each version is a tagged commit (`v0.1` ... `v0.32`); see [CHANGELOG.md](CHANGELOG.md). The source of earlier
 versions was reconstructed from the development session and checked against the source hashes recorded in each
 built `.elemod` (0.11 against its flashed firmware); 0.4 and 0.5 match in compiled code but differ from the
 built files in some comment text.

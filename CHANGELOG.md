@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.32 (2026-11-13): RETRO much lighter
+
+With RETRO on, the UI slowed right down while playing, in both engines: RETRO worked out a remainder (a slow division on this processor) on every output sample of every voice. It now does so once per held value, and voices that are off are skipped. The sound is unchanged.
+
 ## 0.31 (2026-11-13): LOOP END, lighter time synth
 
 LOOP END is back, on page 2 H (level stays on page 1): END by default, or a place in the sample, snapped to a zero crossing; with SUS, releasing plays from the loop on to END. In the time synth it sets the wave the loop runs to. The time synth costs about a third less, and reads its waves more cheaply when the audio is near its limit. Known issue: the unit froze on 0.30 when ENG was switched while notes sounded; not reproduced in the emulator, and an audio overload is the likely cause.

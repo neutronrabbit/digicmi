@@ -329,7 +329,10 @@ static int32_t hold_val[8];
 static u32 hold_phase[8], hold_inc[8];
 static int hold_last[8];
 
-static void retro_rate(int v, int32_t *b, int mode)
+/* 0.32: the 8-bit cut is applied once, to each value as it is taken (step > 0), not to every output sample, and
+ * the clock's wrap is a subtraction: the same output with far fewer divisions (one per taken value instead of one
+ * or two per sample; with eight voices 0.31's per-sample remainders slowed the unit's UI while playing). */
+static void retro_rate(int v, int32_t *b, int mode, int step)
 {
     HOLD_STEP = hold_steps[mode];
     int pos = POS(v), adv = pos - hold_last[v], i;
@@ -341,13 +344,23 @@ static void retro_rate(int v, int32_t *b, int mode)
         hold_inc[v] = 0x10000;
     } else if (adv > 0 && adv < 4096)                        /* not a loop's wrap or a jump */
         hold_inc[v] = (u32)adv << 11;                        /* adv / 32 output samples, 16.16 */
-    for (i = 0; i < 32; i++) {
-        hold_phase[v] += hold_inc[v];
-        if (hold_phase[v] >= HOLD_STEP) {
-            hold_phase[v] %= HOLD_STEP;
-            hold_val[v] = b[i];
+    {
+        u32 ph = hold_phase[v], inc = hold_inc[v];
+        int32_t hv = hold_val[v];
+        for (i = 0; i < 32; i++) {
+            ph += inc;
+            if (ph >= HOLD_STEP) {
+                ph -= HOLD_STEP;
+                while (ph >= HOLD_STEP)              /* only above an octave up: more than one step a sample */
+                    ph -= HOLD_STEP;
+                hv = b[i];
+                if (step > 0)
+                    hv -= hv % step;                 /* towards zero, as an 8-bit sample truncates */
+            }
+            b[i] = hv;
         }
-        b[i] = hold_val[v];
+        hold_phase[v] = ph;
+        hold_val[v] = hv;
     }
 }
 
@@ -372,7 +385,7 @@ void digicmi_render(int32_t *blocks)
                 fade_end[v] = 1;                             /* in decay and silent for a while: end it */
         } else
             fade_count[v] = 0;
-        if (!is_cmi(v)) {
+        if (!is_cmi(v) || !*(volatile unsigned char *)(V(v) + 0x28)) {   /* not CMI, or off (0.32): nothing to do */
             hold_last[v] = POS(v);
             continue;
         }
@@ -383,15 +396,9 @@ void digicmi_render(int32_t *blocks)
                      (PARAM(v, 46) >> 8) & 127, ts_loop_frame(v), ts_loop_end(v), GAIN(v),
                      (int)((fw_voice_start >> v) & 1));
         if (RETRO_MODE(v)) {                                 /* RETRO: its rate at the note's clock; 8 bits from 2 */
-            int g = GAIN(v), step, mode = RETRO_MODE(v);
-            retro_rate(v, b, mode);
-            if (mode < 2 || g <= 0)
-                continue;
-            step = (int)((((u32)g >> 8) * 207u) >> 7);
-            if (step <= 0)
-                continue;
-            for (i = 0; i < 32; i++)
-                b[i] -= b[i] % step;                         /* towards zero, as an 8-bit sample truncates */
+            int g = GAIN(v), mode = RETRO_MODE(v);
+            int step = mode >= 2 && g > 0 ? (int)((((u32)g >> 8) * 207u) >> 7) : 0;
+            retro_rate(v, b, mode, step);
         }
     }
 }
