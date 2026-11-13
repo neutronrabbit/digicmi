@@ -641,6 +641,9 @@ def spin(m, pc, *args, **kw):
                     on_.append("v%d ph%d %.0fdB end%d gain%d" % (v_, env_[0], 20 * __import__("math").log10(max(abs(env_[1]), 1) / 2 ** 31),
                                uc.mem_read(vs_ + 0x29, 1)[0], struct.unpack(">i", uc.mem_read(vs_ + 0x10, 4))[0]))
             log.append("voices on, %s: %d  %s" % (act[1], len(on_), " ".join(on_)))
+            amp_ = [struct.unpack(">ii", uc.mem_read(0x4199ed64 + 8 * v_, 8)) for v_ in range(8)]   # the real AMP envelope (1.54)
+            log.append("   amp env (phase, value/2^31): %s" % " ".join("v%d:%d,%.4f" % (v_, ph_, abs(lv_) / 2 ** 31)
+                       for v_, (ph_, lv_) in enumerate(amp_) if ph_ or lv_))
             if "fade_end" in MAP:
                 log.append("   fade_end %s, end-reached bytes %s, stage calls %s" % (list(uc.mem_read(MAP["fade_end"], 8)),
                            [uc.mem_read(0x8000EDC4 + 94 * v_ + 0x29, 1)[0] for v_ in range(8)], state.get("stagecalls")))

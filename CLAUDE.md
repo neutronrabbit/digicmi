@@ -283,6 +283,17 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - `digicmi_voice_pos` returns only `newest` (the voice of the latest CMI note start, set in `digicmi_render`), while it is on and its gate is held (phase != 0). Page 2's redraw requests therefore stop at release. Checked: arrow moving while held (x 94 -> 119), none after release with a long release ringing.
 - `digicmi_steal`: rank 0 voice off (V+0x28 == 0), 1 released (phase 0), 2 held by the sequencer; within a rank the oldest start. Live-held voices (OWNER 2) never. No fw_amp_env level any more. Checked: six notes took voices 0-5; overlap still both sides. The regression's "every steal took the quietest eligible voice" check is now outdated (not rerun).
 
+## The real AMP envelope (found 0.29+, not used yet)
+
+- **`0x4199ed64 + 8 v` on OS 1.54** (8 bytes a voice; 1.53 presumably 0x4199dd64, unverified): +0 phase, +4 value. Updated by 0x400716c0, the render's amp stage, called after the players with the blocks and three bytes a voice from the smoothed parameters: slots **38 (AMP attack), 39 (hold), 40 (decay)** (bytes 94, 96, 98 of a voice's 106).
+  - phase 2 attack: value rises (negated Q31) to 0x80000000, then phase 1 and value = 0.
+  - phase 1 hold: value is a **time counter**, the sound is at full; ends when it reaches the hold table's time, or, with HOLD = 127, at the note's release (then phase 0 with value 0x80000000).
+  - phase 0 decay: value is the level, multiplied down each sample; 0 when idle (the array is zeroed at init, 0x40071872).
+  - So a voice's audible level: phase 1 -> full; else |value| / 2^31.
+- **Verified against the output (digiemu, `DIGICMI_LONGHOLD=1`):** after release the value reads 0.60, 0.31, 0.093, 0.0096 at +40/+80/+160/+320 steps; the output's level relative to held is 0.57, 0.29, 0.087, 0.0090 (averaged over the 20 steps after each).
+- `fw_amp_env` (0x4199ef54 on 1.54) is the **filter** envelope: 0x40073304 fills it from parameter words 76, 78, 80, 82, 88 = slots 29, 30, 31, 32, 35 (attack, decay, sustain, release, delay). The core's name and docs are wrong; worth reporting upstream with a proposal to export the real one.
+- What this enables (none built yet): switching released voices off when truly silent (the pile-up), a true "quietest voice" for stealing, and arrows that follow the sound.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.
