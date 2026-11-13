@@ -1213,9 +1213,8 @@ if "digicmi_steal" in MAP:
                 fails.append("steal at step %d: chose voice %d with none eligible" % (n, ch))
         elif ch not in cand:
             fails.append("steal at step %d: chose voice %d, not eligible (eligible %s)" % (n, ch, cand))
-        elif lvl[ch] > min(lvl[v] for v in cand):
-            fails.append("steal at step %d: chose voice %d at level %d, but %s were quieter (levels %s)"
-                         % (n, ch, lvl[ch], [v for v in cand if lvl[v] < lvl[ch]], lvl))
+        # (0.1-0.28 also checked "the quietest by fw_amp_env's level"; that level is the filter envelope's and
+        # 0.29 steals by off / released / held and age, so only eligibility is checked here)
     print("steals: %d, %d of them with eligible voices at different levels" % (len(st), telling))
     if os.environ.get("DIGICMI_STEALS"):
         for n, ch, elig, lvl in st:

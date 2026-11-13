@@ -94,6 +94,25 @@ static void zc_snap(int v, int *ls, int *le)
  * 32 release), not the audio's level: measured in digiemu, the output stays constant through a held note while
  * that level falls to -135 dB, and fades after release while it doesn't move. So it cut voices that were still
  * sounding. The phase beside it (2 attack, 1 held, 0 released) still tells the gate.) */
+/* Voice off when silent (0.30), by the real AMP envelope: the render's amp stage (0x400716c0) keeps, per voice,
+ * a phase (2 attack, 1 hold, 0 decay) and a value (in decay: the level, negated Q31, falling to 0) at AMPENV;
+ * measured against the output, the value is the sound's level. A CMI voice that is on, in decay and below
+ * AMP_SILENT for AMP_BLOCKS blocks running is ended: the gain stage is told "not looping, end reached" and
+ * quarters the gain each block (digicmi_stage), and once the gain is 0 the voice is switched off (V + 0x28 = 0,
+ * as after boot). Without this a looping note keeps its voice on and streaming for good after it has faded; on
+ * the unit released notes piled up on all eight voices and the audio load rose (86% -> 94%). The "end reached"
+ * flag set here is cleared when the voice's next note starts. */
+#ifdef OS154
+#define AMPENV     0x4199ed64u
+#else
+#define AMPENV     0x4199dd64u                               /* by the 0x1000 shift of this region: unverified */
+#endif
+#define AMP_PHASE(v)  (*(volatile int *)(AMPENV + 8u * (u32)(v)))
+#define AMP_VALUE(v)  (*(volatile int *)(AMPENV + 8u * (u32)(v) + 4))
+#define AMP_SILENT  0x10000                                  /* Q31 magnitude: -90 dB */
+#define AMP_BLOCKS  64
+static unsigned char fade_end[8], fade_count[8], fade_flagged[8];
+
 static signed char dir[8];
 static unsigned char released[8], have[8], eff[8];
 static int last[8];
@@ -223,6 +242,19 @@ int digicmi_play(int v, int play, int *win)
 /* The later stage's PLAY word (its loop flag), for voice v: ours for a CMI voice, else the stock word. */
 int digicmi_stage(int v, int word)
 {
+    if ((unsigned)v < 8 && ((fw_voice_start >> v) & 1)) {    /* a new note: not faded, and no stale end flag */
+        fade_end[v] = 0;
+        fade_count[v] = 0;
+        if (fade_flagged[v]) {
+            *(volatile unsigned char *)(V(v) + 0x29) = 0;
+            fade_flagged[v] = 0;
+        }
+    }
+    if ((unsigned)v < 8 && fade_end[v]) {                    /* silent: end it, as at a sample's end */
+        *(volatile unsigned char *)(V(v) + 0x29) = 1;
+        fade_flagged[v] = 1;
+        return (word & 0xff) | (P_FWD << 8);
+    }
     if ((unsigned)v > 7 || !eff[v])
         return word;
     return (word & 0xff) | (eff[v] << 8);
@@ -294,6 +326,18 @@ void digicmi_render(int32_t *blocks)
         int32_t *b = blocks + 32 * v;
         if (((fw_voice_start >> v) & 1) && is_cmi(v))
             newest = (signed char)v;                         /* the page's one playhead follows the latest note */
+        if ((fw_voice_start >> v) & 1) {
+            fade_end[v] = 0;                                 /* a new note */
+            fade_count[v] = 0;
+        } else if (fade_end[v]) {
+            if (GAIN(v) == 0)                                /* faded to nothing: the voice off, as after boot */
+                *(volatile unsigned char *)(V(v) + 0x28) = 0;
+        } else if (is_cmi(v) && *(volatile unsigned char *)(V(v) + 0x28) && AMP_PHASE(v) == 0
+                   && AMP_VALUE(v) > -AMP_SILENT && AMP_VALUE(v) < AMP_SILENT) {
+            if (++fade_count[v] >= AMP_BLOCKS)
+                fade_end[v] = 1;                             /* in decay and silent for a while: end it */
+        } else
+            fade_count[v] = 0;
         if (!is_cmi(v)) {
             hold_last[v] = POS(v);
             continue;

@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.30 (2026-11-13): silent voices switch off, by the real amp envelope
+
+A released note's voice is switched off once its amp envelope has decayed below -90 dB for 64 blocks. The amp envelope is the firmware's own (found by disassembling the render), checked against the audio output; 0.26-0.27 used a value that turned out to be the filter envelope's. Known issue: OS 1.53's address is inferred, and the effect on the audio load needs checking on the unit.
+
 ## 0.29 (2026-11-13): one playhead, stealing by gate and age
 
 Page 2 shows a single playhead arrow, for the most recent note while it is held, so the page stops redrawing as soon as the note is let go. Voice stealing no longer uses the unreliable envelope level: a voice that is off first, else the oldest released note, else the oldest held sequencer note.

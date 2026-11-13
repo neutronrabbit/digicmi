@@ -292,7 +292,13 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
   - So a voice's audible level: phase 1 -> full; else |value| / 2^31.
 - **Verified against the output (digiemu, `DIGICMI_LONGHOLD=1`):** after release the value reads 0.60, 0.31, 0.093, 0.0096 at +40/+80/+160/+320 steps; the output's level relative to held is 0.57, 0.29, 0.087, 0.0090 (averaged over the 20 steps after each).
 - `fw_amp_env` (0x4199ef54 on 1.54) is the **filter** envelope: 0x40073304 fills it from parameter words 76, 78, 80, 82, 88 = slots 29, 30, 31, 32, 35 (attack, decay, sustain, release, delay). The core's name and docs are wrong; worth reporting upstream with a proposal to export the real one.
-- What this enables (none built yet): switching released voices off when truly silent (the pile-up), a true "quietest voice" for stealing, and arrows that follow the sound.
+- Used from 0.30 for the voice switch-off (below). Still possible: a true "quietest voice" for stealing, arrows that follow the sound.
+
+## Voices off when silent, by the real AMP envelope (0.30)
+
+- cmi_loop.c: `AMP_PHASE(v)` / `AMP_VALUE(v)` at AMPENV (0x4199ed64 on 1.54; 0x4199dd64 on 1.53 by the region's 0x1000 shift, unverified). A CMI voice that is on, in phase 0 (decay) and |value| < 0x10000 (-90 dB) for 64 blocks running gets `fade_end`: `digicmi_stage` reports it non-looping with end reached (gain quartered per block), and once the gain is 0 `digicmi_render` clears V+0x28. A note's start clears `fade_end`, `fade_count` and the end flag we set (`fade_flagged`), in the stage (the first thing to run for it).
+- Measured (digiemu): pile-up voices go off in order of their decay; a 1200-step held note's release fades 0.9975 -> 0.0097 by +320 steps and stays on meanwhile (no dead stop); overlap both sides; sus (LEN 90) and hold pass. The regression's old "quietest" steal check is retired (only eligibility is checked).
+- Unverified on the unit: the load after playing (94% -> 86%?) and the lag.
 
 ## Constraints and facts
 
@@ -300,8 +306,8 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - **Root C3 = MIDI 60**, the stock unpitched note: no transposition.
 - **digiemu's factory project plays silence for samples** (every `fw_track_blocks` block reads 0, at the render's 0x40077fba too), so audio levels can't be measured there; check the gain's inputs instead.
 
-- `fw_amp_env[3*t + 1]` (core export; 0x4199ef54 on 1.54) is the AMP envelope level as **negated Q31**: about -0.8 of full scale while sounding, small negative values near the end of a release, 0 when silent. Compare magnitudes. elekloader's docs only say "level +4". Measured in digiemu.
-- `digicmi_steal` in poly.c is non-inline on purpose: `digicmi/tests/digiemu_poly.py` hooks it and checks every steal took the quietest eligible voice (`DIGICMI_STEALS=1` prints each steal).
+- `fw_amp_env` (core export; 0x4199ef54 on 1.54) is the **filter** envelope, whatever its name (see 0.28 / "The real AMP envelope"); its phase still follows the gate. The real AMP envelope is at 0x4199ed64 + 8 v.
+- `digicmi_steal` in poly.c is non-inline on purpose: `digicmi/tests/digiemu_poly.py` hooks it and checks every steal took an eligible voice (`DIGICMI_STEALS=1` prints each steal).
 - Mod RAM: 128 KB shared by all mods (256 KB with core 4.0, chosen automatically when needed).
 - Sample RAM: 64 MB per project; 48 kHz, 16-bit mono ≈ 96 KB/s. 16 × 6 s ≈ 9 MB.
 - Audio tracks are monophonic on stock firmware; polyphony comes from borrowing tracks.
