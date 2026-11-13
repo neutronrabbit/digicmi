@@ -8,7 +8,9 @@
  * on the sample at half rate, then refined at full rate with a parabola) or set by ROOT (page 1 F, slot 52:
  * 0 AUTO, else MIDI note 23 + value; a value with a low byte, as kits from before 0.20 hold there, is AUTO). A region with no clear period falls back to C3 (183.47
  * samples). Each cycle starts at the first upward zero crossing after its place and is resampled to TS_LEN; a straight ramp takes out the difference between its
- * two ends so it loops without a click. All frames share one scale (the loudest frame's peak to 29000), so
+ * two ends so it loops without a click. (0.17-0.32 scaled all frames so the loudest peaked at 29000, which made the
+ * time synth much louder than the sample; from 0.33 the waves keep the sample's own level, and SMEAR scales back to
+ * the loudest unsmeared wave's peak, so it doesn't change the loudness.) All frames share one scale, so
  * quiet parts of the sample stay quieter. The tables are rebuilt in the UI tick when the sample, STRT or LEN
  * change, into the bank the render is not reading, then switched in one store.
  * Per voice (cmi_loop.c's digicmi_render calls ts_voice), from the voice's own smoothed values:
@@ -45,6 +47,7 @@ typedef unsigned int u32;
 
 static short tab[2][TS_FRAMES][TS_LEN + 1];
 static short raw[TS_FRAMES][TS_LEN + 1];           /* the cut waves, before SMEAR */
+static int raw_peak = 1;                            /* their loudest point (0.33: SMEAR scales back to it) */
 static volatile int bank = -1;                      /* the bank the render reads; -1 none built yet */
 static const short *built_pcm;
 static u32 built_len;
@@ -184,6 +187,7 @@ static void cut(const short *pcm, u32 len, int strt, int lenv, int root)
 {
     u32 st[TS_FRAMES], s0, se, span, need;
     int f, n, peak = 1, drift[TS_FRAMES];
+    raw_peak = 1;
     cycle_fix = CYCLE;
     root_found = 0;
     if (pcm && len > 1024) {
@@ -232,15 +236,19 @@ static void cut(const short *pcm, u32 len, int strt, int lenv, int root)
                 peak = x;
         }
     }
+    raw_peak = peak > 32767 ? 32767 : peak;
     for (f = 0; f < TS_FRAMES; f++) {
         for (n = 0; n < TS_LEN; n++)
-            raw[f][n] = (short)((at(pcm, st[f], (u32)n) - drift[f] * n / TS_LEN) * 29000 / peak);
+        {
+            int x = at(pcm, st[f], (u32)n) - drift[f] * n / TS_LEN;   /* the sample's own level (0.33) */
+            raw[f][n] = (short)(x > 32767 ? 32767 : x < -32768 ? -32768 : x);
+        }
         raw[f][TS_LEN] = raw[f][0];
     }
 }
 
 /* The tables the voices read: raw's waves, SMEAR'd. Wave f is the weighted sum of waves f - r .. f + r (weights
- * a triangle, r = smear x 15 / 127 in 8.8), scaled back so the loudest wave peaks at 29000 again. */
+ * a triangle, r = smear x 15 / 127 in 8.8), scaled back so the loudest wave peaks where the unsmeared ones did. */
 static void smear_into(int into, int smear)
 {
     int f, g, n, peak = 1, r = smear * 15 * 256 / 127;
@@ -267,7 +275,7 @@ static void smear_into(int into, int smear)
     }
     for (f = 0; f < TS_FRAMES; f++) {
         for (n = 0; n < TS_LEN; n++)
-            tab[into][f][n] = (short)(acc[f][n] * 29000 / peak);
+            tab[into][f][n] = (short)(acc[f][n] / peak * raw_peak + acc[f][n] % peak * raw_peak / peak);
         tab[into][f][TS_LEN] = tab[into][f][0];
     }
 }

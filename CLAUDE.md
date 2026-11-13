@@ -315,6 +315,11 @@ TUNE, PLAY (FWD, REV, FWD.L, REV.L), BR, SAMP / STRT, LEN, LOOP, LEV. The stock 
 - Checked: RETRO held shares 0.531/0.427/0.312/0.129 and 0 off-grid values, same as 0.31; regression PASS. Block-by-block output can't be compared across builds in digiemu (note starts shift with code timing; `DIGICMI_BLKDUMP` writes the blocks).
 - Lesson: on this CPU, count divisions, not just instructions, in per-sample code.
 
+## Time synth level; named boxes (0.33)
+
+- timesynth.c `cut()` keeps the cycles at the sample's level (clamped to s16, `raw_peak` = their peak); `smear_into` rescales to `raw_peak` instead of 29000. Measured on the 440 Hz test sine: TIME 469,034 vs SMPL 469,968 average output (0.32: up to ~2x).
+- cmi_page.c: BLND / SMEAR / TIME boxes show "BLND", "SMEAR", "TIME", and the value (seconds for TIME) for VAL_TICKS = 45 UI ticks after it changes (`*_age`, `last_*`; the page tick asks for one frame when the time is up). The 0.18-0.32 "B"/"S" prefixes read as 8 and 5 in font5. Test: `DIGICMI_BOXTURN=1` with TIMESHOT turns B and snaps.
+
 ## Constraints and facts
 
 - **Velocity → volume is stock.** The render (0x40077a2c on 1.54) takes each voice's velocity from its message's +20 word, adds a modulation term, clamps it to 0–127 and stores it in `fw_voice_vel[v]`. Both sample players (0x40075184, 0x400757fe) pass it with the voice's volume to 0x40074c60, which returns **gain = (vel/127)² × (VOL/127)**: a square-law curve. digicmi adds no code for it; the test checks that every CMI voice, stolen ones included, is given its own note's velocity.

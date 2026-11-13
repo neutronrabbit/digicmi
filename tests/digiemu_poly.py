@@ -177,6 +177,10 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
             at(4, "encoder", 7, 4)
         for d_, nm in ((10, "a"), (60, "b"), (150, "c"), (300, "d"), (600, "e")):
             at(d_, "snap", "q5_gturn_" + nm)
+        if os.environ.get("DIGICMI_BOXTURN"):    # B (BLND) turned: its box shows the number, then the name again
+            for _ in range(4):
+                at(4, "encoder", 2, -4)
+            at(20, "snap", "q5_bturn_now"); at(400, "snap", "q5_bturn_later")
         PAGES_END = t + 2
     if os.environ.get("DIGICMI_SLURTEST"):      # legato: track 1's key held, track 2's key pressed; then a detached note
         at(0, "chord", (0x40, 0x40, 0x40))

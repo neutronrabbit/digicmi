@@ -350,6 +350,11 @@ static void vbox(void *bmp, int k, const char *s, int dotted_frame)
  * last drawn, so the screen that followed - the sample browser, say - was redrawn 30 times a second while
  * notes sounded, and the UI felt sluggish.) */
 static int page2_live;
+/* BLND and SMEAR's boxes (0.33): the name, and the number for VAL_TICKS UI ticks after the value changes (a
+ * prefix letter, 0.18-0.32, read as a digit in the 3 x 5 font: S as 5, B as 8). */
+#define VAL_TICKS 45
+static int blnd_age = 1000, smear_age = 1000, last_blnd = -1, last_smear = -1;
+static int time_age = 1000, last_time = -1;     /* TIME's box too: the name, the seconds while it changes */
 static int cmi_live;                            /* the last frame drawn was the CMI's page 1 or 2 */
 static int meter_shown = -2;                    /* the load the title bar shows */
 extern volatile int digicmi_cpu_load;           /* cpumeter.c: the render's peak load, 256ths; -1 not measured */
@@ -402,6 +407,12 @@ void digicmi_page_tick(void *ctrl)
     digicmi_ts_tick();                          /* timesynth.c: the waves, when track 1's sample, STRT or LEN change */
     odd ^= 1;
     digicmi_uiticks++;
+    if (blnd_age < 1000 && ++blnd_age == VAL_TICKS && page2_live && ctrl)
+        *((unsigned char *)ctrl + 0x20) = 1;    /* BLND's box back to its name */
+    if (smear_age < 1000 && ++smear_age == VAL_TICKS && page2_live && ctrl)
+        *((unsigned char *)ctrl + 0x20) = 1;    /* SMEAR's box back to its name */
+    if (time_age < 1000 && ++time_age == VAL_TICKS && page2_live && ctrl)
+        *((unsigned char *)ctrl + 0x20) = 1;    /* TIME's box back to its name */
     if (digicmi_param_moved) {
         digicmi_param_moved = 0;
         popup_hold = POPUP_TICKS;
@@ -441,11 +452,35 @@ void digicmi_wave_draw(void *bmp, void *ctrl)
     fw_fillrect(bmp, PX0, 8, 127, 54, 0);        /* the page's knobs go; its bottom labels stay */
     vbox(bmp, 0, shown.play < 5 ? plays[shown.play] : "?", 0);
     if (shown.eng >= 96) {                       /* TIME: B BLND, C SMEAR (LMOD's slot), D TIME (slot 49) */
-        put_u(put_s(b, "B"), (unsigned)shown.blnd);
+        if (shown.blnd != last_blnd) {           /* changed: show the number a while */
+            if (last_blnd >= 0)
+                blnd_age = 0;
+            last_blnd = shown.blnd;
+        }
+        if (blnd_age < VAL_TICKS)
+            put_u(b, (unsigned)shown.blnd);
+        else
+            put_s(b, "BLND");
         vbox(bmp, 1, b, 0);
-        put_u(put_s(b, "S"), (unsigned)shown.lmod);
+        if (shown.lmod != last_smear) {
+            if (last_smear >= 0)
+                smear_age = 0;
+            last_smear = shown.lmod;
+        }
+        if (smear_age < VAL_TICKS)
+            put_u(b, (unsigned)shown.lmod);
+        else
+            put_s(b, "SMEAR");
         vbox(bmp, 2, b, 0);
-        put_secs(b, (unsigned)shown.lfin * 120u / 127u);
+        if (shown.lfin != last_time) {
+            if (last_time >= 0)
+                time_age = 0;
+            last_time = shown.lfin;
+        }
+        if (time_age < VAL_TICKS)
+            put_secs(b, (unsigned)shown.lfin * 120u / 127u);
+        else
+            put_s(b, "TIME");
         vbox(bmp, 3, b, 0);
     } else {
         vbox(bmp, 1, "", 1);                     /* B and D: empty places, as the Digitakt II draws them */
