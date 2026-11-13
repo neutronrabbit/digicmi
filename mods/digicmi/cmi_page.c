@@ -163,6 +163,10 @@ static char *put_secs(char *buf, unsigned g)
     unsigned ms;
     char *b;
     g = g > 120 ? 120 : g;
+    if (g == 0) {                               /* 0.37: TIME's lowest step is OFF (the pass follows the note) */
+        buf[0] = 'O'; buf[1] = 'F'; buf[2] = 'F'; buf[3] = 0;
+        return buf + 3;
+    }
     ms = (50u << (g / 15)) * 32768u / exp2n[(g % 15) * 16 / 15];
     b = buf;
     if (ms < 10000) {                           /* 0.05-9.99 s */
@@ -409,6 +413,7 @@ static void put_glyph(void *bmp, int x, int g)
 /* A knob's pop-up ("Retro=8BIT 24KHZ") fills the title bar, the meter's strip included: the meter stays away
  * for POPUP_TICKS UI ticks after any parameter is set (poly.c flags each set_param), then comes back. */
 #define POPUP_TICKS 120                         /* measured: a pop-up lasts ~96-120 UI ticks */
+#define TURN_QUIET 15                           /* arrow pauses ~0.5 s after the last knob step */
 extern volatile int digicmi_param_moved;
 static int popup_hold;
 
@@ -439,11 +444,19 @@ int digicmi_enc(void *brain, void *ev)
 
 void digicmi_page_tick(void *ctrl)
 {
-    static int was, odd;
-    int v, pos, any = 0;
+    static int was, phase, turn_age = 1000;
+    int v, pos, any = 0, frame;
     uint32_t vl;
     digicmi_ts_tick();                          /* timesynth.c: the waves, when track 1's sample, STRT or LEN change */
-    odd ^= 1;
+    /* Arrow frames: every 3rd tick (10/s), every 6th (5/s) when the audio is near its limit,
+       and none while a knob is turning (the firmware redraws the page for each step anyway). */
+    if (++phase >= (digicmi_cpu_load > 230 ? 6 : 3))
+        phase = 0;
+    if (turn_age < 1000)
+        turn_age++;
+    if (digicmi_param_moved)
+        turn_age = 0;
+    frame = phase == 0 && turn_age >= TURN_QUIET;
     digicmi_uiticks++;
     names_follow_engine();
     if (blnd_age < 1000 && ++blnd_age == VAL_TICKS && page2_live && ctrl)
@@ -465,9 +478,9 @@ void digicmi_page_tick(void *ctrl)
     }
     for (v = 0; v < 8; v++)
         any |= digicmi_voice_pos(v, &pos, &vl);
-    if ((any || was) && odd)
+    if ((any || was) && frame)
         *((unsigned char *)ctrl + 0x20) = 1;
-    if (odd)
+    if (frame)
         was = any;
 }
 

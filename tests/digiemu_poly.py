@@ -168,6 +168,11 @@ if os.environ.get("DIGICMI_SRCSHOT"):           # the machine's SRC page (key 20
     if os.environ.get("DIGICMI_REDRAWTEST"):    # frames drawn: page 2 with a held note, then the TRIG page, note still held
         tap(20, 20, 150)
         at(1, "press", 24); at(60, "frames", "page 2, note held"); at(400, "frames", None)
+        if os.environ.get("DIGICMI_TURNFRAMES"):     # D (TIME in the time synth) turned every 8 steps while the note holds
+            at(0, "frames", "page 2, D turning")
+            for i_ in range(50):
+                at(8, "encoder", 4, 1 if i_ % 2 else -1)
+            at(0, "frames", None); at(0, "frames", "page 2, after turning"); at(400, "frames", None)
         tap(19, 20, 60); at(0, "frames", "TRIG page, note held"); at(400, "frames", None); at(5, "release", 24)
         at(0, "frames", "TRIG page, no note"); at(300, "frames", None)
         PAGES_END = t + 2

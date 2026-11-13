@@ -47,6 +47,7 @@ typedef unsigned int u32;
 
 static short tab[2][TS_FRAMES][TS_LEN + 1];
 static short raw[TS_FRAMES][TS_LEN + 1];           /* the cut waves, before SMEAR */
+static volatile u32 cut_s0, cut_per = 1;           /* 0.37, TIME OFF: wave 0's sample and samples per wave */
 static int raw_peak = 1;                            /* their loudest point (0.33: SMEAR scales back to it) */
 static volatile int bank = -1;                      /* the bank the render reads; -1 none built yet */
 static const short *built_pcm;
@@ -217,6 +218,8 @@ static void cut(const short *pcm, u32 len, int strt, int lenv, int root)
     if (se > len)
         se = len;
     span = se > s0 + need ? se - s0 - need : 0;
+    cut_s0 = s0;
+    cut_per = span / (TS_FRAMES - 1) ? span / (TS_FRAMES - 1) : 1;
     for (f = 0; f < TS_FRAMES; f++) {
         u32 c = s0 + span / (TS_FRAMES - 1) * (u32)f + (span % (TS_FRAMES - 1)) * (u32)f / (TS_FRAMES - 1), i;
         u32 lim = c + (cycle_fix >> 16);
@@ -395,16 +398,24 @@ void ts_voice(int v, int32_t *b, int play_pos, int mode, int time, int blend, in
 
     /* the pass, once a block: a whole one (first wave to last) takes 75 x 2^(T/15) blocks */
     time = time < 0 ? 0 : time > 120 ? 120 : time;
-    if (time != c_time[v]) {
+    if (time == 0) {                                /* 0.37, TIME OFF: the waves follow the playhead, so the pass
+                                                       runs at the note's speed, like the sample engine */
+        u32 per = cut_per, d = play_pos > (int)cut_s0 ? (u32)play_pos - cut_s0 : 0, fr = d / per, rem = d - fr * per;
+        fr = fr >= TS_FRAMES - 1 ? (u32)LAST_FRAME
+           : (fr << 16) + (per > 0xffff ? rem / ((per >> 16) + 1) : (rem << 16) / per);
+        fpos[v] = (int)fr;
+    } else if (time != c_time[v]) {
         int blocks = (int)(((u32)(75 << (time / 15)) * 32768u) / exp2n[(time % 15) * 16 / 15]);
         c_step[v] = LAST_FRAME / (blocks < 1 ? 1 : blocks) + 1;
         c_time[v] = time;
     }
-    if (!start)
+    if (!start && time)
         fpos[v] += fdir[v] * c_step[v];
     loop_end = loop_end < 0 ? 0 : loop_end > LAST_FRAME ? LAST_FRAME : loop_end;
     loop_frame = loop_frame < 0 ? 0 : loop_frame > loop_end ? loop_end : loop_frame;
-    if (mode == 2) {                                /* FWD.L: first to LOOP END, then round from LOOP */
+    if (!time)
+        ;                                           /* OFF: the player's own loop and direction already apply */
+    else if (mode == 2) {                           /* FWD.L: first to LOOP END, then round from LOOP */
         if (fpos[v] > loop_end)
             fpos[v] = loop_frame;
     } else if (mode == 4) {                         /* P: first to LOOP END, then between it and LOOP */

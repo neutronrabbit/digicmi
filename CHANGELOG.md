@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.37 (2026-11-13): TIME OFF; lighter page 2
+
+TIME's lowest step is now OFF: the time synth's pass through its waves follows the note's playhead, so it runs faster for higher notes and follows PLAY and the loop, like the sample engine. Page 2's playhead arrow now redraws 10 times a second (5 when the CPU meter is above about 90%), and pauses while a knob is turning, resuming about half a second after it stops.
+
 ## 0.36 (2026-11-13): SUS fixed in ping-pong; unused knobs do nothing
 
 The cause of SUS stopping dead on release: in ping-pong the voice's "end reached" flag stays set, and once SUS stopped looping the firmware treated the note as finished. The flag is now cleared on release, and SUS is back to what it means: stop looping and play through the rest of the sample once. On the sample page, B and D now do nothing at all: no pop-up, no change.

@@ -64,7 +64,7 @@ Page 2 with ENG = TIME:
 | A | PLAY | As for the sample, over the 16 waves: FWD and REV play through once; FWD.L plays first to last, then loops from LOOP's wave to the last; REV.L loops from the last down to LOOP's; P plays first to last, then back and forth between the last and LOOP's |
 | B | BLND | 0 steps from wave to wave (CMI segments); 127 crossfades all the way |
 | C | SMEAR | Mixes each wave with its neighbours, up to all of them; 0 off (shares LMOD's value) |
-| D | TIME | Time of one pass from the first wave to the last, 0.05 s to about 13 s, shown in seconds |
+| D | TIME | Time of one pass from the first wave to the last, about 0.07 s to 13 s, shown in seconds. All the way left is OFF: the pass follows the note's playhead, so its speed tracks the pitch and it follows PLAY and the loop, like the sample engine |
 | E, F | STRT, LEN | The part of the sample the waves are cut from |
 | G | LOOP | The wave the loop starts at, between STRT and END (shown on the waveform) |
 | H | LEND | The wave the loop runs to: END (the last wave), or a place between LOOP and END |

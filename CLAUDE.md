@@ -397,3 +397,8 @@ ghidra-projects/
 - digi1_mods (Digi Poly): https://github.com/gdeo607/digi1_mods
 - Digi Poly on Modwerk: https://modwerk.app/digitakt/module/digipoly/
 - DIGISLICER: https://github.com/irpina/digislicer
+
+## TIME OFF and arrow pacing (0.37)
+
+- TIME 0 (put_secs shows OFF) in `ts_voice`: `fpos` = (POS - cut_s0) / cut_per as 16.16 waves, clamped to LAST_FRAME; `cut()` stores wave 0's sample (`cut_s0`) and samples per wave (`cut_per`). The pass's own step and its PLAY/loop logic are skipped (the stock player already loops and turns). Emulator (LRTEST + LOOPPROBE, FWD, ENG TIME): waves 0-15 then round the loop; TUNE 76 wraps 5 times to TUNE 64's 2; TIME 20 runs 9.3-15 without wrapping.
+- Arrow redraws (`digicmi_page_tick`): every 3rd UI tick, every 6th when `digicmi_cpu_load > 230`, and none until TURN_QUIET (15) ticks after the last `digicmi_param_moved`. REDRAWTEST + TURNFRAMES (D turned every 8 steps) gives the same frame counts for 0.36 and 0.37 (7/15/7 per 400 steps): the emulator's own draw rate is the limit, so the effect is only visible on the unit.
