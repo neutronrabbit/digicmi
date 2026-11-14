@@ -155,6 +155,11 @@ static int is_cmi(int v)
     return core_track_machine[v] == CMI_ID || (s >= 0x40000000u && *(volatile unsigned char *)(s + 0x7e) == CMI_ID);
 }
 
+static unsigned char wc_ok[8];                               /* 0.38: each voice's window, cached */
+static u32 wc_len[8];
+static const short *wc_pcm[8];
+static int wc_in[8][4], wc_out[8][5];
+
 /* Both players, right after the window (cmi_loop.s): the PLAY to read, and the window in win[0..1]. */
 int digicmi_play(int v, int play, int *win)
 {
@@ -172,29 +177,41 @@ int digicmi_play(int v, int play, int *win)
         return play;                                         /* REV, FWD and other machines: stock */
 
     u32 len = SLEN(v);
-    int strt = clamp(PARAM(v, 21), 0, FULL);
-    int endv = clamp(PARAM(v, 21) + PARAM(v, 22), 0, FULL);
-    int g = PARAM(v, 23);
-    int loopv = g ? clamp(g - 1, 0, FULL) : strt;
-    int llen = 0, sus = ((PARAM(v, 47) >> 8) & 127) >= 64;     /* 0.13: no LLEN; the loop ends at END */
+    int sus = ((PARAM(v, 47) >> 8) & 127) >= 64;
     int alt = play == P_PP, rev = play == P_REVL;
-    loopv = clamp(loopv, 0, endv);
-
-    int s0 = (int)scale((u32)strt, len), se = (int)scale((u32)endv, len);
-    int ls = (int)scale((u32)loopv, len);
-    int lendv = lend_val(v);                                 /* 0.31: LOOP END, or END */
-    int le = lendv >= 0 ? (int)scale((u32)clamp(lendv, loopv, endv), len) : se;
-    (void)llen;
-    if (le > se)
-        le = se;
-    if (le - ls >= MIN_LOOP)
-        zc_snap(v, &ls, &le);                                /* 0.23: both on zero crossings */
-    if (le - ls < MIN_LOOP) {                                /* too short for the player: as short as it takes */
-        le = ls + MIN_LOOP;
-        if (le > se) {
-            le = se;
-            ls = se - MIN_LOOP > 0 ? se - MIN_LOOP : 0;
+    int s0, se, ls, le, lendv;
+    {   /* 0.38: the window only changes with the sample, STRT, LEN, LOOP or LOOP END; ~13 divisions a voice a
+           block before, now once per change */
+        int p21 = PARAM(v, 21), p22 = PARAM(v, 22), g = PARAM(v, 23), p52 = PARAM(v, 52);
+        const short *pcm = PCM(v);
+        if (!wc_ok[v] || wc_len[v] != len || wc_pcm[v] != pcm || wc_in[v][0] != p21 || wc_in[v][1] != p22
+            || wc_in[v][2] != g || wc_in[v][3] != p52) {
+            int strt = clamp(p21, 0, FULL);
+            int endv = clamp(p21 + p22, 0, FULL);
+            int loopv = g ? clamp(g - 1, 0, FULL) : strt;
+            loopv = clamp(loopv, 0, endv);
+            s0 = (int)scale((u32)strt, len);
+            se = (int)scale((u32)endv, len);
+            ls = (int)scale((u32)loopv, len);
+            lendv = lend_val(v);                             /* 0.31: LOOP END, or END */
+            le = lendv >= 0 ? (int)scale((u32)clamp(lendv, loopv, endv), len) : se;
+            if (le > se)
+                le = se;
+            if (le - ls >= MIN_LOOP)
+                zc_snap(v, &ls, &le);                        /* 0.23: both on zero crossings */
+            if (le - ls < MIN_LOOP) {                        /* too short for the player: as short as it takes */
+                le = ls + MIN_LOOP;
+                if (le > se) {
+                    le = se;
+                    ls = se - MIN_LOOP > 0 ? se - MIN_LOOP : 0;
+                }
+            }
+            wc_len[v] = len; wc_pcm[v] = pcm;
+            wc_in[v][0] = p21; wc_in[v][1] = p22; wc_in[v][2] = g; wc_in[v][3] = p52;
+            wc_out[v][0] = s0; wc_out[v][1] = se; wc_out[v][2] = ls; wc_out[v][3] = le; wc_out[v][4] = lendv;
+            wc_ok[v] = 1;
         }
+        s0 = wc_out[v][0]; se = wc_out[v][1]; ls = wc_out[v][2]; le = wc_out[v][3]; lendv = wc_out[v][4];
     }
 
     int start = (int)((fw_voice_start >> v) & 1), pos = POS(v);

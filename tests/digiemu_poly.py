@@ -651,6 +651,7 @@ def spin(m, pc, *args, **kw):
                     return
                 if ad < 0x47000000:
                     o, fn_ = "firmware", "firmware"
+                    fw_ = pr.setdefault("fw", {}); fw_[ad >> 6] = fw_.get(ad >> 6, 0) + 1
                 else:
                     i_ = bisect.bisect_right(keys_, ad) - 1
                     o, fn_ = (owners_[i_][1], owners_[i_][2]) if i_ >= 0 else ("?", "?")
@@ -1276,6 +1277,11 @@ for pr in state.get("prof", []):
         print("   %-14s %5.1f%%  %7.0f a block" % (o_, 100.0 * n_ / tot, n_ / max(pr["blocks"], 1)))
     for f_, n_ in sorted(pr["fn"].items(), key=lambda x: -x[1])[:6]:
         print("      digicmi %-22s %6.0f a block" % (f_, n_ / max(pr["blocks"], 1)))
+    if pr.get("fw") and os.environ.get("DIGICMI_FWPROF"):   # the firmware's share, by 64-byte region
+        json.dump({"%x" % (k_ << 6): n_ / max(pr["blocks"], 1) for k_, n_ in pr["fw"].items()},
+                  open(os.environ["DIGICMI_FWPROF"] + "-" + pr["label"].split()[0] + ".json", "w"))
+        for k_, n_ in sorted(pr["fw"].items(), key=lambda x: -x[1])[:30]:
+            print("      fw 0x%08x %7.0f a block" % (k_ << 6, n_ / max(pr["blocks"], 1)))
 if os.environ.get("DIGICMI_SLURTEST"):
     for r in state.get("vr", []):
         if r[6] and r[11]:                        # a CMI voice's first block: where its note starts

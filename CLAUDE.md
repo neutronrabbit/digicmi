@@ -402,3 +402,11 @@ ghidra-projects/
 
 - TIME 0 (put_secs shows OFF) in `ts_voice`: `fpos` = (POS - cut_s0) / cut_per as 16.16 waves, clamped to LAST_FRAME; `cut()` stores wave 0's sample (`cut_s0`) and samples per wave (`cut_per`). The pass's own step and its PLAY/loop logic are skipped (the stock player already loops and turns). Emulator (LRTEST + LOOPPROBE, FWD, ENG TIME): waves 0-15 then round the loop; TUNE 76 wraps 5 times to TUNE 64's 2; TIME 20 runs 9.3-15 without wrapping.
 - Arrow redraws (`digicmi_page_tick`): every 3rd UI tick, every 6th when `digicmi_cpu_load > 230`, and none until TURN_QUIET (15) ticks after the last `digicmi_param_moved`. REDRAWTEST + TURNFRAMES (D turned every 8 steps) gives the same frame counts for 0.36 and 0.37 (7/15/7 per 400 steps): the emulator's own draw rate is the limit, so the effect is only visible on the unit.
+
+## Loop window cache and the firmware's render profile (0.38)
+
+- `digicmi_play` caches each voice's window (s0, se, ls, le, LOOP END) keyed on SLEN, PCM and slots 21, 22, 23, 52 (`wc_*`). Checked: LOOPTEST alt and sus PASS in P; SUSREL (P, LOOP 0, LEND 13, LMOD 100) trace identical to 0.37. Instructions barely change (816 vs 832 a block, 4 notes): the saving is ~13 divisions a looping voice a block, which INSNPROF counts as one instruction each.
+- `DIGICMI_FWPROF=<prefix>` (with INSNPROF) splits the firmware's share by 64-byte region, top 30 printed, all saved as JSON. Idle and 4 notes held are the same region for region (83.6k vs 82.8k a block): the stock render does all eight voices' work whether they play or not.
+- By 1 KB region (idle): 0x40075800-0x40076400 (the sample players and gain stage, where cmi_loop.s hooks) ~17.6k a block, ~21% of the render; 0x40075ec0 alone 8,240 = 8 voices x 32 samples x ~32. 0x40071800-0x40074c00 ~55k (amp, filters, effects; not split by voice yet). Off voices likely play the silent dummy sample (len 248) through the full loop.
+- Candidate: skip the player for a voice that is off (V+0x28 = 0), writing a zero block: up to ~2.2k instructions a voice a block. Not started: needs the player's call structure (the render calls through function pointers, (a2) x18).
+- `fwdis.py` (scratchpad, not in the repo): capstone M68K_040 over the main section at 0x40000000, stepping 2 bytes past ColdFire-only opcodes.

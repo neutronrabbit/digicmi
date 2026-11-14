@@ -2,6 +2,10 @@
 
 Digi CMI, Digitakt mk1 OS 1.54. Each version is a tagged commit. Hardware: builds up to 0.14 and 0.25 ran on the author's unit; the rest from 0.17 only in digiemu.
 
+## 0.38 (2026-11-14): loop points worked out once
+
+Each looping CMI voice used to work out its loop points (with a dozen slow divisions) in every audio block. They are now stored, and worked out again only when the sample, STRT, LEN, LOOP or LOOP END changes. Same sound; a little less audio load.
+
 ## 0.37 (2026-11-13): TIME OFF; lighter page 2
 
 TIME's lowest step is now OFF: the time synth's pass through its waves follows the note's playhead, so it runs faster for higher notes and follows PLAY and the loop, like the sample engine. Page 2's playhead arrow now redraws 10 times a second (5 when the CPU meter is above about 90%), and pauses while a knob is turning, resuming about half a second after it stops.
